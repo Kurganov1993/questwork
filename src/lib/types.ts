@@ -1,3 +1,19 @@
+export type StaticIssue = {
+  file: string;
+  line?: number;
+  rule: string;
+  severity: 'error' | 'warning' | 'info';
+  message: string;
+};
+
+export type SemgrepFinding = {
+  file: string;
+  line: number;
+  rule: string;
+  severity: string;
+  message: string;
+};
+
 export type PhaseResult = {
   order: number;
   name: string;
@@ -6,6 +22,11 @@ export type PhaseResult = {
   damage: number;
   passed: boolean;
   logs: string[];
+  details?: {
+    staticIssues?: StaticIssue[];
+    semgrepFindings?: SemgrepFinding[];
+    metrics?: Record<string, number>;
+  };
 };
 
 export type VerifyReport = {

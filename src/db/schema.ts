@@ -44,6 +44,7 @@ export const quests = pgTable('quests', {
   difficulty: integer('difficulty').notNull().default(1),
   rewardXp: integer('reward_xp').notNull().default(100),
   rewardGold: integer('reward_gold').notNull().default(10),
+  victoryThreshold: integer('victory_threshold').notNull().default(85),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 

@@ -1,8 +1,13 @@
 const GH_API = 'https://api.github.com';
 
 export class GitHubError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+    public rateLimit?: { remaining: number; reset: number },
+  ) {
     super(message);
+    this.name = 'GitHubError';
   }
 }
 
@@ -10,9 +15,12 @@ type RepoRef = { owner: string; repo: string };
 
 export function parseRepoUrl(url: string): RepoRef | null {
   try {
-    const u = new URL(url);
+    const u = new URL(url.trim());
     if (!/^(www\.)?github\.com$/.test(u.hostname)) return null;
-    const parts = u.pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/, '').split('/');
+    const parts = u.pathname
+      .replace(/^\/+|\/+$/g, '')
+      .replace(/\.git$/, '')
+      .split('/');
     if (parts.length < 2) return null;
     return { owner: parts[0], repo: parts[1] };
   } catch {
@@ -20,23 +28,79 @@ export function parseRepoUrl(url: string): RepoRef | null {
   }
 }
 
-async function gh<T>(path: string): Promise<T> {
+async function gh<T>(path: string, attempt = 1): Promise<T> {
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
     'User-Agent': 'questwork-prototype',
   };
-  if (process.env.GITHUB_TOKEN) {
-    headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+
+  const token = process.env.GITHUB_TOKEN?.trim();
+  if (token && token.length > 0) {
+    headers.Authorization = `Bearer ${token}`;
   }
-  const res = await fetch(`${GH_API}${path}`, { headers, cache: 'no-store' });
+
+  let res: Response;
+  try {
+    res = await fetch(`${GH_API}${path}`, {
+      headers,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (e) {
+    const err = e as Error & { cause?: unknown };
+    const cause = err.cause as
+      | (Error & { code?: string; errno?: number; syscall?: string })
+      | undefined;
+
+    const details = cause
+      ? `${cause.name ?? 'Error'}: ${cause.message ?? ''}${
+          cause.code ? ` [${cause.code}]` : ''
+        }${cause.syscall ? ` syscall=${cause.syscall}` : ''}`
+      : err.message;
+
+    if (attempt === 1) {
+      await new Promise((r) => setTimeout(r, 400));
+      return gh<T>(path, 2);
+    }
+
+    throw new GitHubError(
+      0,
+      `Сетевая ошибка при запросе к GitHub (${GH_API}${path}): ${details}`,
+    );
+  }
+
+  const remaining = res.headers.get('x-ratelimit-remaining');
+  const reset = res.headers.get('x-ratelimit-reset');
+  const rateLimit =
+    remaining !== null
+      ? { remaining: Number(remaining), reset: Number(reset ?? 0) }
+      : undefined;
+
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new GitHubError(res.status, `GitHub ${res.status}: ${body.slice(0, 200)}`);
+    let reason = `GitHub ${res.status}`;
+
+    if (res.status === 401) {
+      reason = 'GitHub 401: токен невалиден. Проверь GITHUB_TOKEN или удали его.';
+    } else if (res.status === 403) {
+      if (rateLimit && rateLimit.remaining === 0) {
+        const resetAt = new Date(rateLimit.reset * 1000).toLocaleTimeString('ru-RU');
+        reason = `GitHub 403: лимит исчерпан. Сброс в ${resetAt}. Добавь/проверь GITHUB_TOKEN.`;
+      } else {
+        reason = `GitHub 403: доступ запрещён. ${body.slice(0, 150)}`;
+      }
+    } else if (res.status === 404) {
+      reason = 'GitHub 404: репозиторий не найден или приватный.';
+    } else {
+      reason = `GitHub ${res.status}: ${body.slice(0, 200)}`;
+    }
+
+    throw new GitHubError(res.status, reason, rateLimit);
   }
+
   return res.json() as Promise<T>;
 }
-
-// --- Типы ответов (только нужные поля) ---
 
 export type GhRepo = {
   full_name: string;
@@ -67,8 +131,6 @@ export type GhContentItem = {
   type: 'file' | 'dir';
   size: number;
 };
-
-// --- Публичные методы ---
 
 export const getRepo = (owner: string, repo: string) =>
   gh<GhRepo>(`/repos/${owner}/${repo}`);
@@ -113,7 +175,6 @@ export async function getFileText(
   }
 }
 
-// Простой поиск файла в дереве (рекурсивно, до 3 уровней вглубь)
 export async function listTree(
   owner: string,
   repo: string,
@@ -124,9 +185,7 @@ export async function listTree(
   if (depth > maxDepth) return [];
   let items: GhContentItem[] = [];
   try {
-    items = await gh<GhContentItem[]>(
-      `/repos/${owner}/${repo}/contents/${path}`,
-    );
+    items = await gh<GhContentItem[]>(`/repos/${owner}/${repo}/contents/${path}`);
   } catch {
     return [];
   }
@@ -134,7 +193,10 @@ export async function listTree(
   const result: GhContentItem[] = [...items];
   const dirs = items.filter((i) => i.type === 'dir');
   for (const d of dirs) {
-    if (['node_modules', '.git', '.next', 'dist', 'build', 'coverage'].includes(d.name)) continue;
+    if (
+      ['node_modules', '.git', '.next', 'dist', 'build', 'coverage'].includes(d.name)
+    )
+      continue;
     const sub = await listTree(owner, repo, d.path, depth + 1, maxDepth);
     result.push(...sub);
   }
