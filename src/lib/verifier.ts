@@ -16,6 +16,9 @@ import type {
 } from './types';
 import { runStaticAnalysis, type StaticResult } from './analysis/static';
 import { runSemgrep } from './analysis/semgrep';
+import { probeUrl, type ProbeResult } from './analysis/deploy-probe';
+
+// ---------- Контекст проверки ----------
 
 type Ctx = {
   owner: string;
@@ -41,6 +44,8 @@ type PhaseDef = {
     details?: PhaseResult['details'];
   }>;
 };
+
+// ---------- Определения фаз ----------
 
 const PHASES: PhaseDef[] = [
   {
@@ -270,6 +275,8 @@ const PHASES: PhaseDef[] = [
     maxHp: 20,
     run: async ({ readme, repoMeta }) => {
       const logs: string[] = [];
+
+      // 1. Собираем ссылки
       const sources: string[] = [];
       if (repoMeta.homepage) sources.push(repoMeta.homepage);
       if (readme) {
@@ -284,80 +291,94 @@ const PHASES: PhaseDef[] = [
         return { passed: false, logs };
       }
 
-      const urls = Array.from(new Set(sources));
-      let best: {
-        url: string;
-        status: number | null;
-        ms: number;
-        note?: string;
-      } | null = null;
+      const urls = Array.from(new Set(sources)).slice(0, 3);
+      logs.push(`✔ Заявлено ссылок: ${urls.length}`);
+      for (const u of urls) logs.push(`  • ${u}`);
 
-      for (const url of urls.slice(0, 3)) {
-        const started = Date.now();
-        try {
-          const controller = new AbortController();
-          const t = setTimeout(() => controller.abort(), 8000);
-          const res = await fetch(url, {
-            method: 'GET',
-            signal: controller.signal,
-            redirect: 'follow',
-            headers: {
-              'User-Agent': 'questwork-prototype',
-              Accept: 'text/html,*/*',
-            },
-          });
-          clearTimeout(t);
+      // Часть 1: заявлена — 10 HP
+      const declaredHp = 10;
 
-          best = {
-            url,
-            status: res.status,
-            ms: Date.now() - started,
-            note:
-              res.status === 401 || res.status === 403
-                ? 'доступ закрыт (возможно, Vercel Auth / приватный preview)'
-                : res.status === 404
-                ? 'страница не найдена'
-                : undefined,
-          };
-          break;
-        } catch {
-          if (!best) {
-            best = { url, status: null, ms: Date.now() - started };
-          }
+      // 2. Реально проверяем через probeUrl (curl → fetch fallback)
+      let best: ProbeResult | null = null;
+
+      for (const url of urls) {
+        logs.push(`→ Проверяем: ${url}`);
+
+        const r1 = await probeUrl(url, 'HEAD', 12_000);
+        logs.push(
+          `  HEAD ${r1.ms}ms → ${r1.status ?? `ошибка: ${r1.error}`}${
+            r1.viaCurl ? ' (curl)' : ' (fetch)'
+          }`,
+        );
+
+        let r: ProbeResult = r1;
+        if (r.status === null || r.status === 405 || r.status === 501) {
+          r = await probeUrl(url, 'GET', 15_000);
+          logs.push(
+            `  GET ${r.ms}ms → ${r.status ?? `ошибка: ${r.error}`}${
+              r.viaCurl ? ' (curl)' : ' (fetch)'
+            }`,
+          );
         }
+
+        best = r;
+        if (r.status !== null) break;
       }
 
       if (!best) {
-        logs.push('✘ Ни одна из ссылок не отвечает');
-        return { passed: false, logs };
+        logs.push('⚠ Не удалось выполнить проверку');
+        return {
+          passed: true,
+          logs,
+          details: {
+            metrics: { deployDeclaredHp: declaredHp, deployReachable: 0 },
+          },
+        };
       }
 
-      logs.push(`✔ Проверяем: ${best.url}`);
-      logs.push(`  Время ответа: ${best.ms}ms`);
-
+      // 3. Сеть не пустила — не наказываем игрока
       if (best.status === null) {
-        logs.push('✘ Деплой недоступен (DNS/сеть/таймаут)');
-        return { passed: false, logs };
+        logs.push(
+          `⚠ Ссылка заявлена, но недоступна из нашей сети: ${best.error}`,
+        );
+        logs.push('✔ Засчитываем как «деплой заявлен» — +10 HP');
+        return {
+          passed: true,
+          logs,
+          details: {
+            metrics: { deployDeclaredHp: declaredHp, deployReachable: 0 },
+          },
+        };
       }
 
+      // 4. Ответ есть
       const reachable = best.status >= 200 && best.status < 500;
       const authBlocked = best.status === 401 || best.status === 403;
 
-      if (reachable && !authBlocked) {
-        logs.push(`✔ Ответ ${best.status} — деплой живой`);
-        return { passed: true, logs };
+      if (reachable || authBlocked) {
+        logs.push(`✔ Ответ ${best.status} за ${best.ms}ms — деплой доступен`);
+        return {
+          passed: true,
+          logs,
+          details: {
+            metrics: {
+              deployDeclaredHp: declaredHp,
+              deployReachable: declaredHp,
+            },
+          },
+        };
       }
 
-      if (authBlocked) {
-        logs.push(`✔ Ответ ${best.status} — ${best.note}`);
-        logs.push(
-          '⚠ Засчитываем как «деплой существует», но проверить содержимое не можем',
-        );
-        return { passed: true, logs };
-      }
-
-      logs.push(`✘ Ответ ${best.status} — ${best.note ?? 'некорректный статус'}`);
-      return { passed: false, logs };
+      logs.push(
+        `⚠ Ответ ${best.status} — деплой заявлен, но работает некорректно`,
+      );
+      return {
+        passed: true,
+        logs,
+        details: {
+          metrics: { deployDeclaredHp: declaredHp, deployReachable: 0 },
+        },
+      };
     },
   },
   {
@@ -466,6 +487,8 @@ const PHASES: PhaseDef[] = [
   },
 ];
 
+// ---------- Точка входа ----------
+
 export async function runVerification(
   repoUrl: string,
   victoryThreshold = 85,
@@ -573,7 +596,15 @@ export async function runVerification(
         logs: [`✘ Ошибка проверки: ${(e as Error).message}`],
       };
     }
-    const damage = result.passed ? def.maxHp : 0;
+
+    let damage = result.passed ? def.maxHp : 0;
+
+    // Частичный урон: если фаза вернула deploy*-метрики — берём из них
+    const m = result.details?.metrics;
+    if (m && typeof m.deployDeclaredHp === 'number') {
+      damage = m.deployDeclaredHp + (m.deployReachable ?? 0);
+    }
+
     totalDamage += damage;
 
     phases.push({

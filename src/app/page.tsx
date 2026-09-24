@@ -3,25 +3,7 @@ import Link from 'next/link';
 export default function HomePage() {
   return (
     <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black">
-      {/* Header */}
-      <header className="border-b border-zinc-800/60 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-md bg-amber-500/20 border border-amber-500/40 grid place-items-center text-amber-400 font-bold">
-            Q
-          </div>
-          <span className="font-semibold tracking-wide">QUESTWORK</span>
-        </div>
-        <nav className="flex items-center gap-6 text-sm text-zinc-400">
-          <Link href="#quests" className="hover:text-amber-400">Квесты</Link>
-          <Link href="#how" className="hover:text-amber-400">Как это работает</Link>
-          <Link
-            href="/verify"
-            className="px-4 py-2 rounded-md bg-amber-500 text-black font-medium hover:bg-amber-400 transition"
-          >
-            Проверить код
-          </Link>
-        </nav>
-      </header>
+     
 
       {/* Hero */}
       <section className="max-w-6xl mx-auto px-6 pt-20 pb-16 text-center">

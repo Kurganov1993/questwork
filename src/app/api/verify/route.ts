@@ -3,6 +3,7 @@ import { db } from '@/db';
 import { quests, submissions, heroes } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { runVerification } from '@/lib/verifier';
+import { getCurrentHero } from '@/lib/auth';
 import type { VerifyResponse } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -10,6 +11,14 @@ export const maxDuration = 120;
 
 export async function POST(req: NextRequest) {
   try {
+    const hero = await getCurrentHero();
+    if (!hero) {
+      return NextResponse.json<VerifyResponse>(
+        { ok: false, error: 'Нужно войти в аккаунт героя' },
+        { status: 401 },
+      );
+    }
+
     const body = await req.json();
     const { repoUrl, questSlug } = body as {
       repoUrl?: string;
@@ -35,28 +44,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const guest = await getOrCreateGuestHero();
-
+    console.log('[api/verify] hero:', { id: hero.id, nickname: hero.nickname });
     console.log('[api/verify] quest:', {
-  slug: quest.slug,
-  victoryThreshold: quest.victoryThreshold,
-  bossMaxHp: quest.bossMaxHp,
-});
+      slug: quest.slug,
+      victoryThreshold: quest.victoryThreshold,
+      bossMaxHp: quest.bossMaxHp,
+    });
 
-const report = await runVerification(repoUrl, quest.victoryThreshold);
+    const report = await runVerification(repoUrl, quest.victoryThreshold);
 
-console.log('[api/verify] result:', {
-  totalDamage: report.totalDamage,
-  bossMaxHp: report.bossMaxHp,
-  threshold: quest.victoryThreshold,
-  needed: report.bossMaxHp * (quest.victoryThreshold / 100),
-  victory: report.victory,
-});
+    console.log('[api/verify] result:', {
+      totalDamage: report.totalDamage,
+      bossMaxHp: report.bossMaxHp,
+      threshold: quest.victoryThreshold,
+      victory: report.victory,
+    });
 
     const [submission] = await db
       .insert(submissions)
       .values({
-        heroId: guest.id,
+        heroId: hero.id,
         questId: quest.id,
         repoUrl,
         status: report.victory ? 'victory' : 'defeat',
@@ -66,14 +73,23 @@ console.log('[api/verify] result:', {
       .returning();
 
     if (report.victory) {
+      const [fresh] = await db
+        .select({
+          xp: heroes.xp,
+          gold: heroes.gold,
+          level: heroes.level,
+        })
+        .from(heroes)
+        .where(eq(heroes.id, hero.id));
+
       await db
         .update(heroes)
         .set({
-          xp: guest.xp + quest.rewardXp,
-          gold: guest.gold + quest.rewardGold,
-          level: guest.level + 1,
+          xp: fresh.xp + quest.rewardXp,
+          gold: fresh.gold + quest.rewardGold,
+          level: fresh.level + 1,
         })
-        .where(eq(heroes.id, guest.id));
+        .where(eq(heroes.id, hero.id));
     }
 
     return NextResponse.json<VerifyResponse>({
@@ -88,17 +104,4 @@ console.log('[api/verify] result:', {
       { status: 500 },
     );
   }
-}
-
-async function getOrCreateGuestHero() {
-  const [existing] = await db
-    .select()
-    .from(heroes)
-    .where(eq(heroes.nickname, 'guest'));
-  if (existing) return existing;
-  const [created] = await db
-    .insert(heroes)
-    .values({ nickname: 'guest', heroClass: 'frontend_mage' })
-    .returning();
-  return created;
 }

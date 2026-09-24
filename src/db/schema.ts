@@ -1,6 +1,13 @@
 import {
-  pgTable, pgEnum, serial, varchar, text, integer,
-  timestamp, jsonb,
+  pgTable,
+  pgEnum,
+  serial,
+  varchar,
+  text,
+  integer,
+  timestamp,
+  jsonb,
+  index,
 } from 'drizzle-orm/pg-core';
 
 // Классы героев
@@ -26,12 +33,29 @@ export const submissionStatusEnum = pgEnum('submission_status', [
 export const heroes = pgTable('heroes', {
   id: serial('id').primaryKey(),
   nickname: varchar('nickname', { length: 64 }).notNull().unique(),
+  passwordHash: varchar('password_hash', { length: 255 }),
   heroClass: heroClassEnum('hero_class').notNull(),
   level: integer('level').notNull().default(1),
   xp: integer('xp').notNull().default(0),
   gold: integer('gold').notNull().default(0),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
+
+// Сессии (cookie-токен → герой)
+export const sessions = pgTable(
+  'sessions',
+  {
+    id: varchar('id', { length: 64 }).primaryKey(),
+    heroId: integer('hero_id')
+      .notNull()
+      .references(() => heroes.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    expiresAt: timestamp('expires_at').notNull(),
+  },
+  (t) => ({
+    heroIdx: index('sessions_hero_idx').on(t.heroId),
+  }),
+);
 
 // Квесты
 export const quests = pgTable('quests', {
