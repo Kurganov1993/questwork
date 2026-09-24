@@ -1,72 +1,87 @@
 import Link from 'next/link';
+import { db } from '@/db';
+import { quests } from '@/db/schema';
 
-export default function HomePage() {
+export const dynamic = 'force-dynamic';
+
+export default async function HomePage() {
+  const allQuests = await db.select().from(quests).orderBy(quests.difficulty).limit(3);
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black">
-     
-
       {/* Hero */}
       <section className="max-w-6xl mx-auto px-6 pt-20 pb-16 text-center">
-        <p className="text-amber-400/80 text-sm tracking-widest mb-4">
-          НАЙМ КАК РЕЙД
-        </p>
+        <p className="text-amber-400/80 text-sm tracking-widest mb-4">НАЙМ КАК РЕЙД</p>
         <h1 className="text-5xl md:text-6xl font-bold leading-tight mb-6">
           Прокачай героя.<br />
           Победи босса.<br />
           <span className="text-amber-400">Получи работу.</span>
         </h1>
         <p className="text-zinc-400 max-w-2xl mx-auto mb-10 text-lg">
-          Здесь не откликаются на вакансии. Здесь берут квесты,
-          сдают репозитории и наносят урон боссу — фазе за фазой.
-          Твоё портфолио — это твой персонаж.
+          Здесь не откликаются на вакансии. Здесь берут квесты, сдают репозитории
+          и наносят урон боссу — фазе за фазой. Твоё портфолио — это твой персонаж.
         </p>
         <div className="flex gap-4 justify-center">
           <Link
-            href="/verify"
+            href="/quests"
             className="px-6 py-3 rounded-md bg-amber-500 text-black font-semibold hover:bg-amber-400 transition"
           >
-            Начать квест
+            К доске квестов
           </Link>
           <Link
-            href="#how"
+            href="/register"
             className="px-6 py-3 rounded-md border border-zinc-700 hover:border-amber-500/60 transition"
           >
-            Как это работает
+            Создать героя
           </Link>
         </div>
       </section>
 
-      {/* Active quest card */}
-      <section id="quests" className="max-w-4xl mx-auto px-6 pb-20">
-        <h2 className="text-sm text-zinc-500 tracking-widest mb-4">АКТИВНЫЙ КВЕСТ</h2>
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 hover:border-amber-500/40 transition">
-          <div className="flex items-start justify-between gap-6">
-            <div>
-              <div className="text-xs text-amber-400 mb-2">СЛОЖНОСТЬ ★</div>
-              <h3 className="text-2xl font-semibold mb-2">Создать интернет-магазин</h3>
-              <p className="text-zinc-400 mb-4 max-w-xl">
-                Древний Торговец захватил рынок. Постройте витрину, корзину
-                и оформление заказа, чтобы сразить его.
-              </p>
-              <div className="flex gap-6 text-sm text-zinc-500">
-                <span>👑 Босс: <span className="text-zinc-300">Древний Торговец</span></span>
-                <span>❤️ 100 HP</span>
-                <span>✨ 500 XP</span>
-                <span>🪙 30 золота</span>
-              </div>
-            </div>
-            <Link
-              href="/verify?quest=create-shop"
-              className="shrink-0 px-5 py-3 rounded-md bg-amber-500 text-black font-semibold hover:bg-amber-400 transition"
-            >
-              Принять квест
-            </Link>
-          </div>
+      {/* Quests */}
+      <section className="max-w-4xl mx-auto px-6 pb-20">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm text-zinc-500 tracking-widest">АКТИВНЫЕ КВЕСТЫ</h2>
+          <Link href="/quests" className="text-xs text-amber-400 hover:text-amber-300">
+            все квесты →
+          </Link>
+        </div>
+        <div className="space-y-3">
+          {allQuests.map((q) => {
+            const stars = '★'.repeat(q.difficulty) + '☆'.repeat(Math.max(0, 3 - q.difficulty));
+            return (
+              <Link
+                key={q.id}
+                href={`/quests/${q.slug}`}
+                className="block rounded-xl border border-zinc-800 bg-zinc-900/50 p-5 hover:border-amber-500/40 transition"
+              >
+                <div className="flex items-start justify-between gap-6">
+                  <div className="flex items-start gap-4">
+                    <div className="text-3xl">{q.icon}</div>
+                    <div>
+                      <div className="text-xs text-amber-400 mb-1">
+                        СЛОЖНОСТЬ {stars}
+                      </div>
+                      <div className="text-lg font-semibold mb-1">{q.title}</div>
+                      <p className="text-sm text-zinc-400 mb-2 max-w-xl">
+                        {q.description}
+                      </p>
+                      <div className="flex gap-4 text-xs text-zinc-500">
+                        <span>👑 {q.bossName}</span>
+                        <span>❤️ {q.bossMaxHp} HP</span>
+                        <span>✨ {q.rewardXp} XP</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-amber-400 text-sm shrink-0 pt-2">→</div>
+                </div>
+              </Link>
+            );
+          })}
         </div>
       </section>
 
       {/* How */}
-      <section id="how" className="max-w-6xl mx-auto px-6 pb-24">
+      <section className="max-w-6xl mx-auto px-6 pb-24">
         <h2 className="text-sm text-zinc-500 tracking-widest mb-8 text-center">
           КАК ЭТО РАБОТАЕТ
         </h2>

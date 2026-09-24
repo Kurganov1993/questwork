@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
-import { quests, submissions, heroes } from '@/db/schema';
+import { quests, bossPhases, submissions, heroes } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { runVerification } from '@/lib/verifier';
 import { getCurrentHero } from '@/lib/auth';
@@ -44,19 +44,30 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Тянем фазы квеста из БД
+    const phases = await db
+      .select({
+        phaseOrder: bossPhases.phaseOrder,
+        name: bossPhases.name,
+        description: bossPhases.description,
+        checkType: bossPhases.checkType,
+        maxHp: bossPhases.maxHp,
+      })
+      .from(bossPhases)
+      .where(eq(bossPhases.questId, quest.id));
+
     console.log('[api/verify] hero:', { id: hero.id, nickname: hero.nickname });
     console.log('[api/verify] quest:', {
       slug: quest.slug,
       victoryThreshold: quest.victoryThreshold,
-      bossMaxHp: quest.bossMaxHp,
+      phasesCount: phases.length,
     });
 
-    const report = await runVerification(repoUrl, quest.victoryThreshold);
+    const report = await runVerification(repoUrl, phases, quest.victoryThreshold);
 
     console.log('[api/verify] result:', {
       totalDamage: report.totalDamage,
       bossMaxHp: report.bossMaxHp,
-      threshold: quest.victoryThreshold,
       victory: report.victory,
     });
 
@@ -74,11 +85,7 @@ export async function POST(req: NextRequest) {
 
     if (report.victory) {
       const [fresh] = await db
-        .select({
-          xp: heroes.xp,
-          gold: heroes.gold,
-          level: heroes.level,
-        })
+        .select({ xp: heroes.xp, gold: heroes.gold, level: heroes.level })
         .from(heroes)
         .where(eq(heroes.id, hero.id));
 
