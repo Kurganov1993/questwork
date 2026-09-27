@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { BossHpBar } from '@/components/BossHpBar';
 import { PhaseLog } from '@/components/PhaseLog';
+import { LootCard } from '@/components/LootCard';
 import type { VerifyReport } from '@/lib/types';
 
 export function VerifyClient({
@@ -138,8 +139,30 @@ export function VerifyClient({
             <div className="text-lg font-semibold mb-1">
               {report.victory ? '🏆 Победа!' : '⚰️ Поражение'}
             </div>
-            <div className="text-sm text-zinc-300">{report.summary}</div>
+            <div className="text-sm text-zinc-300 mb-3">{report.summary}</div>
+
+            {report.victory && (
+              <div className="flex gap-4 text-sm pt-3 border-t border-emerald-800/40">
+                {report.xpGained !== undefined && (
+                  <div className="text-amber-400">✨ +{report.xpGained} XP</div>
+                )}
+                {report.goldGained !== undefined && (
+                  <div className="text-amber-400">🪙 +{report.goldGained}</div>
+                )}
+              </div>
+            )}
           </div>
+
+          {report.victory && report.loot && report.loot.length > 0 && (
+            <div>
+              <h2 className="text-sm text-zinc-500 tracking-widest mb-3">ЛУТ</h2>
+              <div className="space-y-2">
+                {report.loot.map((item) => (
+                  <LootCard key={item.id} item={item} />
+                ))}
+              </div>
+            </div>
+          )}
 
           <h2 className="text-sm text-zinc-500 tracking-widest mt-6">ЛОГ БОЯ</h2>
           <div className="space-y-3">

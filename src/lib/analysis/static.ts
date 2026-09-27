@@ -1,16 +1,11 @@
 import { ESLint } from 'eslint';
 import tsParser from '@typescript-eslint/parser';
 import tsPlugin from '@typescript-eslint/eslint-plugin';
-import { getFileText } from '../github';
+import { getFilesBatch } from '../github';
 import type { GhContentItem } from '../github';
+import type { StaticIssue } from '../types';
 
-export type StaticIssue = {
-  file: string;
-  line?: number;
-  rule: string;
-  severity: 'error' | 'warning' | 'info';
-  message: string;
-};
+export type { StaticIssue };
 
 export type StaticResult = {
   filesAnalyzed: number;
@@ -26,8 +21,8 @@ export type StaticResult = {
     errors: number;
     warnings: number;
     passed: boolean;
-    warningsPer100?: number;
-    densityOk?: boolean;
+    warningsPer100: number;
+    densityOk: boolean;
   };
 };
 
@@ -42,7 +37,6 @@ const SKIP_DIRS = [
   'public',
 ];
 
-// Конфиг flat-формата ESLint v9
 const FLAT_CONFIG = [
   {
     files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],
@@ -56,8 +50,6 @@ const FLAT_CONFIG = [
     },
     plugins: { '@typescript-eslint': tsPlugin },
     rules: {
-      // Базовые правила выключаем, если есть TS-версия —
-      // иначе они дублируют друг друга
       'no-unused-vars': 'off',
       '@typescript-eslint/no-unused-vars': [
         'warn',
@@ -80,7 +72,7 @@ export async function runStaticAnalysis(
   owner: string,
   repo: string,
   tree: GhContentItem[],
-  maxFiles = 30,
+  maxFiles = 25,
 ): Promise<StaticResult> {
   const relevantFiles = tree
     .filter((i) => i.type === 'file' && RELEVANT_EXT.test(i.path))
@@ -105,8 +97,26 @@ export async function runStaticAnalysis(
   let consoleCount = 0;
   let todoCount = 0;
 
+  // Один батч-запрос вместо 25 последовательных
+  let fileContents = new Map<string, string>();
+  try {
+    fileContents = await getFilesBatch(
+      owner,
+      repo,
+      relevantFiles.map((f) => f.path),
+      8,
+    );
+  } catch (e) {
+    issues.push({
+      file: '(batch)',
+      rule: 'fetch-failed',
+      severity: 'info',
+      message: `Не удалось загрузить файлы: ${(e as Error).message}`,
+    });
+  }
+
   for (const file of relevantFiles) {
-    const text = await getFileText(owner, repo, file.path);
+    const text = fileContents.get(file.path);
     if (!text) continue;
 
     totalLines += text.split('\n').length;
@@ -140,16 +150,13 @@ export async function runStaticAnalysis(
   const errors = issues.filter((i) => i.severity === 'error').length;
   const warnings = issues.filter((i) => i.severity === 'warning').length;
 
-  // Плотность предупреждений: сколько на 100 строк кода
   const lines = Math.max(1, totalLines);
   const warningsPer100 = (warnings / lines) * 100;
-
-  // Порог: 0 ошибок и не более 5 предупреждений на 100 строк
   const densityOk = warningsPer100 <= 5;
-  const passed = errors === 0 && densityOk;
+  const passed = errors === 0 && densityOk && totalLines > 0;
 
   return {
-    filesAnalyzed: relevantFiles.length,
+    filesAnalyzed: fileContents.size,
     issues: issues.slice(0, 100),
     metrics: {
       totalLines,

@@ -8,7 +8,10 @@ import {
   timestamp,
   jsonb,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
+
+// ---------- ENUM'ы ----------
 
 export const heroClassEnum = pgEnum('hero_class', [
   'frontend_mage',
@@ -26,6 +29,15 @@ export const submissionStatusEnum = pgEnum('submission_status', [
   'defeat',
   'error',
 ]);
+
+export const rarityEnum = pgEnum('rarity', [
+  'common',
+  'rare',
+  'epic',
+  'legendary',
+]);
+
+// ---------- Герои ----------
 
 export const heroes = pgTable('heroes', {
   id: serial('id').primaryKey(),
@@ -52,6 +64,8 @@ export const sessions = pgTable(
     heroIdx: index('sessions_hero_idx').on(t.heroId),
   }),
 );
+
+// ---------- Квесты ----------
 
 export const quests = pgTable('quests', {
   id: serial('id').primaryKey(),
@@ -80,6 +94,8 @@ export const bossPhases = pgTable('boss_phases', {
   maxHp: integer('max_hp').notNull(),
 });
 
+// ---------- Сдачи ----------
+
 export const submissions = pgTable('submissions', {
   id: serial('id').primaryKey(),
   heroId: integer('hero_id')
@@ -94,3 +110,41 @@ export const submissions = pgTable('submissions', {
   report: jsonb('report'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
+
+// ---------- Артефакты ----------
+
+export const artifacts = pgTable('artifacts', {
+  id: serial('id').primaryKey(),
+  slug: varchar('slug', { length: 64 }).notNull().unique(),
+  name: varchar('name', { length: 128 }).notNull(),
+  description: text('description').notNull(),
+  icon: varchar('icon', { length: 8 }).notNull().default('💎'),
+  rarity: rarityEnum('rarity').notNull().default('common'),
+  questId: integer('quest_id')
+    .notNull()
+    .references(() => quests.id, { onDelete: 'cascade' }),
+});
+
+export const heroArtifacts = pgTable(
+  'hero_artifacts',
+  {
+    id: serial('id').primaryKey(),
+    heroId: integer('hero_id')
+      .notNull()
+      .references(() => heroes.id, { onDelete: 'cascade' }),
+    artifactId: integer('artifact_id')
+      .notNull()
+      .references(() => artifacts.id, { onDelete: 'cascade' }),
+    earnedAt: timestamp('earned_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqHeroArtifact: uniqueIndex('hero_artifact_unique').on(
+      t.heroId,
+      t.artifactId,
+    ),
+  }),
+);
+
+// ---------- Типы ----------
+
+export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';

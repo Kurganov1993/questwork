@@ -29,6 +29,16 @@ export type PhaseResult = {
   };
 };
 
+export type LootItem = {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  icon: string;
+  rarity: 'common' | 'rare' | 'epic' | 'legendary';
+  isNew: boolean;
+};
+
 export type VerifyReport = {
   repoUrl: string;
   totalDamage: number;
@@ -36,6 +46,9 @@ export type VerifyReport = {
   victory: boolean;
   phases: PhaseResult[];
   summary: string;
+  loot?: LootItem[];
+  xpGained?: number;
+  goldGained?: number;
 };
 
 export type VerifyResponse =

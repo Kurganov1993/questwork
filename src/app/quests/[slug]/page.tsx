@@ -2,7 +2,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { quests, bossPhases } from '@/db/schema';
+import { quests, bossPhases, artifacts } from '@/db/schema';
+import { LootCard } from '@/components/LootCard';
+import type { LootItem } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +24,13 @@ export default async function QuestPage({
     .where(eq(bossPhases.questId, quest.id))
     .orderBy(bossPhases.phaseOrder);
 
-  const stars = '★'.repeat(quest.difficulty) + '☆'.repeat(Math.max(0, 3 - quest.difficulty));
+  const questArtifacts = await db
+    .select()
+    .from(artifacts)
+    .where(eq(artifacts.questId, quest.id));
+
+  const stars =
+    '★'.repeat(quest.difficulty) + '☆'.repeat(Math.max(0, 3 - quest.difficulty));
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-6 py-10">
@@ -35,7 +43,9 @@ export default async function QuestPage({
           <div className="flex items-start gap-5 mb-5">
             <div className="text-6xl">{quest.icon}</div>
             <div className="flex-1">
-              <div className="text-xs text-amber-400 mb-1">СЛОЖНОСТЬ {stars}</div>
+              <div className="text-xs text-amber-400 mb-1">
+                СЛОЖНОСТЬ {stars}
+              </div>
               <h1 className="text-3xl font-bold mb-2">{quest.title}</h1>
               <p className="text-zinc-400 mb-4">{quest.description}</p>
               <div className="flex flex-wrap gap-4 text-sm text-zinc-400">
@@ -55,6 +65,28 @@ export default async function QuestPage({
             Принять квест
           </Link>
         </div>
+
+        {questArtifacts.length > 0 && (
+          <>
+            <h2 className="text-sm text-zinc-500 tracking-widest mt-8 mb-3">
+              НАГРАДА ЗА ПОБЕДУ
+            </h2>
+            <div className="space-y-2">
+              {questArtifacts.map((a) => {
+                const item: LootItem = {
+                  id: a.id,
+                  slug: a.slug,
+                  name: a.name,
+                  description: a.description,
+                  icon: a.icon,
+                  rarity: a.rarity as LootItem['rarity'],
+                  isNew: false,
+                };
+                return <LootCard key={a.id} item={item} />;
+              })}
+            </div>
+          </>
+        )}
 
         <h2 className="text-sm text-zinc-500 tracking-widest mt-8 mb-3">
           ФАЗЫ БОССА · {quest.bossMaxHp} HP

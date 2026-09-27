@@ -6,6 +6,7 @@ import {
   getReadme,
   getFileText,
   listTree,
+  getFilesBatch,
   GitHubError,
 } from './github';
 import type {
@@ -47,8 +48,6 @@ type CheckResult = {
 
 type CheckFn = (ctx: Ctx) => Promise<CheckResult>;
 
-// ---------- Утилиты ----------
-
 async function loadWorkflowTexts(ctx: Ctx): Promise<Record<string, string>> {
   if (ctx.workflowTexts) return ctx.workflowTexts;
   const wfFiles = ctx.tree.filter(
@@ -57,102 +56,15 @@ async function loadWorkflowTexts(ctx: Ctx): Promise<Record<string, string>> {
       i.path.startsWith('.github/workflows/') &&
       /\.(yml|yaml)$/.test(i.path),
   );
-  const entries = await Promise.all(
-    wfFiles.map(async (f) => [
-      f.path,
-      (await getFileText(ctx.owner, ctx.repo, f.path)) ?? '',
-    ] as const),
+  const contents = await getFilesBatch(
+    ctx.owner,
+    ctx.repo,
+    wfFiles.map((f) => f.path),
+    4,
   );
-  ctx.workflowTexts = Object.fromEntries(entries);
+  ctx.workflowTexts = Object.fromEntries(contents.entries());
   return ctx.workflowTexts;
 }
-
-// ---------- Деплой: типы и логика ----------
-
-type DeployErrorKind = 'network' | 'dns' | 'ssl' | 'abort' | 'unknown';
-
-type DeployAttempt = {
-  url: string;
-  method: string;
-  status: number | null;
-  ms: number;
-  note?: string;
-  error?: string;
-  errorKind?: DeployErrorKind;
-};
-
-function classifyDeployError(err: Error & {
-  cause?: { code?: string; message?: string };
-}): DeployErrorKind {
-  const causeCode = err.cause?.code ?? '';
-  const causeMsg = err.cause?.message ?? '';
-  const msg = `${err.message} ${causeMsg}`.toLowerCase();
-
-  if (causeCode === 'ENOTFOUND' || msg.includes('enotfound'))
-    return 'dns';
-  if (
-    causeCode === 'ETIMEDOUT' ||
-    causeCode === 'ECONNREFUSED' ||
-    causeCode === 'ECONNRESET' ||
-    msg.includes('connect timeout') ||
-    msg.includes('etimedout')
-  )
-    return 'network';
-  if (msg.includes('certificate') || msg.includes('ssl') || msg.includes('tls'))
-    return 'ssl';
-  if (err.name === 'AbortError' || err.name === 'TimeoutError')
-    return 'abort';
-  return 'unknown';
-}
-
-function decideDeploy(
-  a: DeployAttempt,
-  logs: string[],
-): { passed: boolean; logs: string[] } {
-  // Есть HTTP-статус — судим по нему
-  if (a.status !== null) {
-    const authBlocked = a.status === 401 || a.status === 403;
-    const reachable = a.status >= 200 && a.status < 500;
-
-    if (reachable && !authBlocked) {
-      logs.push(`✔ Ответ ${a.status} — деплой живой`);
-      return { passed: true, logs };
-    }
-
-    if (authBlocked) {
-      logs.push(`✔ Ответ ${a.status} — ${a.note}`);
-      logs.push('⚠ Считаем живым: деплой существует, но закрыт авторизацией');
-      return { passed: true, logs };
-    }
-
-    logs.push(`✘ Ответ ${a.status} — ${a.note ?? 'некорректный статус'}`);
-    return { passed: false, logs };
-  }
-
-  // Статуса нет — классифицируем ошибку
-  switch (a.errorKind) {
-    case 'dns':
-      logs.push('✘ DNS не находит домен — деплоя не существует');
-      return { passed: false, logs };
-    case 'ssl':
-      logs.push('✘ Проблема с SSL-сертификатом');
-      return { passed: false, logs };
-    case 'network':
-    case 'abort':
-      logs.push(
-        '⚠ Не удалось установить соединение (сеть/таймаут). Не можем проверить деплой.',
-      );
-      logs.push(
-        '⚠ Засчитываем фазу: проблема на стороне проверяющего, а не игрока.',
-      );
-      return { passed: true, logs };
-    default:
-      logs.push(`✘ Неизвестная ошибка: ${a.error ?? 'без деталей'}`);
-      return { passed: false, logs };
-  }
-}
-
-// ---------- Реестр проверок ----------
 
 const CHECKS: Record<string, CheckFn> = {
   repo_exists: async ({ repoMeta }) => ({
@@ -202,12 +114,7 @@ const CHECKS: Record<string, CheckFn> = {
     logs.push(
       hasBuild ? `✔ Скрипт build: ${scripts.build}` : '✘ Скрипт build не найден',
     );
-    const lockFiles = [
-      'package-lock.json',
-      'pnpm-lock.yaml',
-      'yarn.lock',
-      'bun.lockb',
-    ];
+    const lockFiles = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb'];
     const hasLock = names.some((n) => lockFiles.includes(n));
     logs.push(hasLock ? '✔ Lock-файл на месте' : '⚠ Lock-файл отсутствует');
     return { passed: hasPkg && hasBuild, logs };
@@ -215,7 +122,17 @@ const CHECKS: Record<string, CheckFn> = {
 
   static_analysis: async (ctx) => {
     const logs: string[] = [];
-    const staticRes = await runStaticAnalysis(ctx.owner, ctx.repo, ctx.tree);
+
+    // ESLint (со своим батчем внутри)
+    let staticRes: StaticResult;
+    try {
+      staticRes = await runStaticAnalysis(ctx.owner, ctx.repo, ctx.tree);
+    } catch (e) {
+      return {
+        passed: false,
+        logs: [`✘ ESLint упал: ${(e as Error).message}`],
+      };
+    }
     ctx.staticResult = staticRes;
 
     logs.push(`✔ Проанализировано файлов: ${staticRes.filesAnalyzed}`);
@@ -236,38 +153,47 @@ const CHECKS: Record<string, CheckFn> = {
     if (staticRes.metrics.todoCount > 0)
       logs.push(`  → TODO/FIXME: ${staticRes.metrics.todoCount}`);
 
-    const filesForSemgrep = (
-      await Promise.all(
-        ctx.tree
-          .filter(
-            (i) =>
-              i.type === 'file' &&
-              /\.(ts|tsx|js|jsx|json|env|yml|yaml)$/.test(i.path),
-          )
-          .slice(0, 20)
-          .map(async (i) => ({
-            path: i.path,
-            content: (await getFileText(ctx.owner, ctx.repo, i.path)) ?? '',
-          })),
+    // Semgrep — файлы берём из того же списка, что ESLint
+    const semgrepTargets = ctx.tree
+      .filter(
+        (i) =>
+          i.type === 'file' &&
+          /\.(ts|tsx|js|jsx|json|env|yml|yaml)$/.test(i.path) &&
+          !i.path.includes('node_modules/'),
       )
-    ).filter((f) => f.content);
+      .slice(0, 15);
 
-    const semgrepFindings = await runSemgrep(filesForSemgrep);
+    let semgrepFindings: SemgrepFinding[] = [];
+    try {
+      const semgrepContents = await getFilesBatch(
+        ctx.owner,
+        ctx.repo,
+        semgrepTargets.map((f) => f.path),
+        6,
+      );
+      const filesForSemgrep = Array.from(semgrepContents.entries()).map(
+        ([path, content]) => ({ path, content }),
+      );
+      semgrepFindings = await runSemgrep(filesForSemgrep);
+    } catch (e) {
+      logs.push(`⚠ Semgrep пропущен: ${(e as Error).message}`);
+    }
     ctx.semgrepFindings = semgrepFindings;
+
     const highSeverity = semgrepFindings.filter((f) =>
       /ERROR|HIGH/i.test(f.severity),
     );
     if (highSeverity.length > 0) {
-      logs.push(
-        `✘ Semgrep нашёл ${highSeverity.length} проблем высокой критичности`,
-      );
-      for (const f of highSeverity.slice(0, 3))
+      logs.push(`✘ Semgrep нашёл ${highSeverity.length} проблем высокой критичности`);
+      for (const f of highSeverity.slice(0, 3)) {
         logs.push(`  → ${f.file}:${f.line} ${f.rule}`);
+      }
     } else {
       logs.push('✔ Semgrep не нашёл уязвимостей высокой критичности');
     }
 
     const passed = staticRes.score.passed && highSeverity.length === 0;
+
     return {
       passed,
       logs,
@@ -292,24 +218,18 @@ const CHECKS: Record<string, CheckFn> = {
   tests: async ({ tree, packageJson }) => {
     const logs: string[] = [];
     const paths = tree.map((i) => i.path);
-    const testFiles = paths.filter((p) =>
-      /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(p),
-    );
+    const testFiles = paths.filter((p) => /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(p));
     logs.push(
       testFiles.length > 0
         ? `✔ Найдено тестовых файлов: ${testFiles.length}`
         : '✘ Тестовые файлы не найдены',
     );
     const scripts = (packageJson?.scripts as Record<string, string>) ?? {};
-    const hasTestScript =
-      !!scripts.test && !scripts.test.includes('no test specified');
+    const hasTestScript = !!scripts.test && !scripts.test.includes('no test specified');
     logs.push(
-      hasTestScript
-        ? `✔ Скрипт test: ${scripts.test}`
-        : '✘ Скрипт test не настроен',
+      hasTestScript ? `✔ Скрипт test: ${scripts.test}` : '✘ Скрипт test не настроен',
     );
-    const devDeps =
-      (packageJson?.devDependencies as Record<string, string>) ?? {};
+    const devDeps = (packageJson?.devDependencies as Record<string, string>) ?? {};
     const hasRunner = Object.keys(devDeps).some((d) =>
       /jest|vitest|mocha|ava|node-tap/.test(d),
     );
@@ -331,40 +251,35 @@ const CHECKS: Record<string, CheckFn> = {
         /(vercel\.app|netlify\.app|pages\.dev|railway\.app|render\.com|fly\.dev|herokuapp\.com|github\.io)/;
       sources.push(...matches.filter((m) => deployHosts.test(m)));
     }
-
     if (sources.length === 0) {
       logs.push('✘ Ссылка на деплой не найдена ни в homepage, ни в README');
       return { passed: false, logs };
     }
-
-    const urls = Array.from(new Set(sources)).slice(0, 2);
+    const urls = Array.from(new Set(sources));
     logs.push(`✔ Найдено ссылок: ${urls.length}`);
 
-    const attempt = async (
-      url: string,
-      method: 'HEAD' | 'GET',
-      timeoutMs: number,
-    ): Promise<DeployAttempt> => {
-      const started = Date.now();
+    let best: {
+      url: string;
+      status: number | null;
+      ms: number;
+      note?: string;
+      aborted?: boolean;
+    } | null = null;
+
+    for (const url of urls.slice(0, 3)) {
+      // 1) HEAD с 6с
+      const headStart = Date.now();
       try {
-        const controller = new AbortController();
-        const t = setTimeout(() => controller.abort(), timeoutMs);
         const res = await fetch(url, {
-          method,
-          signal: controller.signal,
+          method: 'HEAD',
+          signal: AbortSignal.timeout(6_000),
           redirect: 'follow',
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (compatible; QuestWork/1.0; +https://questwork.local)',
-            Accept: 'text/html,*/*',
-          },
+          headers: { 'User-Agent': 'questwork-prototype' },
         });
-        clearTimeout(t);
-        return {
+        best = {
           url,
-          method,
           status: res.status,
-          ms: Date.now() - started,
+          ms: Date.now() - headStart,
           note:
             res.status === 401 || res.status === 403
               ? 'доступ закрыт (Vercel Auth / приватный preview)'
@@ -372,44 +287,74 @@ const CHECKS: Record<string, CheckFn> = {
               ? 'страница не найдена'
               : undefined,
         };
+        logs.push(`  HEAD ${best.ms}ms → ${res.status}`);
+        break;
       } catch (e) {
-        const err = e as Error & { cause?: { code?: string; message?: string } };
-        const kind = classifyDeployError(err);
-        const causeMsg = err.cause?.message ?? err.cause?.code ?? '';
-        return {
+        logs.push(
+          `  HEAD ${Date.now() - headStart}ms → ${(e as Error).name}: ${(e as Error).message}`,
+        );
+      }
+
+      // 2) GET с 8с
+      const getStart = Date.now();
+      try {
+        const res = await fetch(url, {
+          method: 'GET',
+          signal: AbortSignal.timeout(8_000),
+          redirect: 'follow',
+          headers: {
+            'User-Agent': 'questwork-prototype',
+            Accept: 'text/html,*/*',
+          },
+        });
+        best = {
           url,
-          method,
-          status: null,
-          ms: Date.now() - started,
-          errorKind: kind,
-          error: `${err.name}: ${err.message}${causeMsg ? ` (${causeMsg})` : ''}`,
+          status: res.status,
+          ms: Date.now() - getStart,
+          note:
+            res.status === 401 || res.status === 403
+              ? 'доступ закрыт (Vercel Auth / приватный preview)'
+              : res.status === 404
+              ? 'страница не найдена'
+              : undefined,
         };
+        logs.push(`  GET ${best.ms}ms → ${res.status}`);
+        break;
+      } catch (e) {
+        logs.push(
+          `  GET ${Date.now() - getStart}ms → ${(e as Error).name}`,
+        );
+        best = { url, status: null, ms: Date.now() - getStart, aborted: true };
       }
-    };
-
-    for (const url of urls) {
-      logs.push(`→ Проверяем: ${url}`);
-
-      // Быстрая попытка HEAD — многие CDN отвечают мгновенно
-      const head = await attempt(url, 'HEAD', 5_000);
-      logs.push(`  HEAD ${head.ms}ms → ${head.status ?? head.error}`);
-      if (head.status !== null) return decideDeploy(head, logs);
-
-      // Если HEAD не дал статуса и это DNS/SSL — сразу решаем
-      if (head.errorKind === 'dns' || head.errorKind === 'ssl') {
-        return decideDeploy(head, logs);
-      }
-
-      // GET с разумным таймаутом
-      const get1 = await attempt(url, 'GET', 10_000);
-      logs.push(`  GET ${get1.ms}ms → ${get1.status ?? get1.error}`);
-      if (get1.status !== null) return decideDeploy(get1, logs);
-
-      // Все попытки для этого URL — сетевые. Применяем правило "benefit of the doubt".
-      return decideDeploy(get1, logs);
     }
 
-    logs.push('✘ Ни одна ссылка не отвечает');
+    if (!best) {
+      logs.push('✘ Ни одна из ссылок не отвечает');
+      return { passed: false, logs };
+    }
+    logs.push(`→ Проверяем: ${best.url}`);
+
+    if (best.status === null) {
+      logs.push(
+        '⚠ Не удалось установить соединение (сеть/таймаут). Не можем проверить деплой.',
+      );
+      logs.push('⚠ Засчитываем фазу: проблема на стороне проверяющего, а не игрока.');
+      return { passed: true, logs };
+    }
+
+    const reachable = best.status >= 200 && best.status < 500;
+    const authBlocked = best.status === 401 || best.status === 403;
+
+    if (reachable && !authBlocked) {
+      logs.push(`✔ Ответ ${best.status} — деплой живой`);
+      return { passed: true, logs };
+    }
+    if (authBlocked) {
+      logs.push(`✔ Ответ ${best.status} — ${best.note}`);
+      logs.push('⚠ Засчитываем: приложение развёрнуто, но закрыто авторизацией.');
+      return { passed: true, logs };
+    }
+    logs.push(`✘ Ответ ${best.status} — ${best.note ?? 'некорректный статус'}`);
     return { passed: false, logs };
   },
 
@@ -419,9 +364,7 @@ const CHECKS: Record<string, CheckFn> = {
     const e2eDir = paths.some((p) =>
       /(^|\/)(e2e|cypress|playwright|tests-e2e)\//.test(p),
     );
-    logs.push(
-      e2eDir ? '✔ Директория E2E-тестов найдена' : '✘ Директория E2E не найдена',
-    );
+    logs.push(e2eDir ? '✔ Директория E2E-тестов найдена' : '✘ Директория E2E не найдена');
     const deps = {
       ...((packageJson?.dependencies as object) ?? {}),
       ...((packageJson?.devDependencies as object) ?? {}),
@@ -441,23 +384,23 @@ const CHECKS: Record<string, CheckFn> = {
     const logs: string[] = [];
     const names = rootContents.map((i) => i.name);
     const hasGitignore = names.includes('.gitignore');
-    logs.push(
-      hasGitignore ? '✔ .gitignore на месте' : '✘ .gitignore отсутствует',
-    );
+    logs.push(hasGitignore ? '✔ .gitignore на месте' : '✘ .gitignore отсутствует');
     const exposedEnv = names.some(
       (n) => n === '.env' || n === '.env.local' || n === '.env.production',
     );
-    logs.push(
-      exposedEnv ? '✘ .env закоммичен в репозиторий!' : '✔ .env не закоммичен',
-    );
+    logs.push(exposedEnv ? '✘ .env закоммичен в репозиторий!' : '✔ .env не закоммичен');
     let gitignoreOk = hasGitignore;
     if (hasGitignore) {
-      const gi = await getFileText(owner, repo, '.gitignore');
-      if (gi && !/\.env/.test(gi)) {
-        logs.push('⚠ .gitignore не содержит .env');
-        gitignoreOk = false;
-      } else if (gi) {
-        logs.push('✔ .gitignore игнорирует .env');
+      try {
+        const gi = await getFileText(owner, repo, '.gitignore');
+        if (gi && !/\.env/.test(gi)) {
+          logs.push('⚠ .gitignore не содержит .env');
+          gitignoreOk = false;
+        } else if (gi) {
+          logs.push('✔ .gitignore игнорирует .env');
+        }
+      } catch {
+        logs.push('⚠ Не удалось прочитать .gitignore');
       }
     }
     const secretPattern =
@@ -479,9 +422,7 @@ const CHECKS: Record<string, CheckFn> = {
     const hasLicense =
       !!repoMeta.license && repoMeta.license.spdx_id !== 'NOASSERTION';
     logs.push(
-      hasLicense
-        ? `✔ Лицензия: ${repoMeta.license!.spdx_id}`
-        : '⚠ Лицензия отсутствует',
+      hasLicense ? `✔ Лицензия: ${repoMeta.license!.spdx_id}` : '⚠ Лицензия отсутствует',
     );
     const hasTs = paths.some((p) => p.endsWith('.ts') || p.endsWith('.tsx'));
     logs.push(hasTs ? '✔ TypeScript в проекте' : '⚠ Только JavaScript');
@@ -489,7 +430,7 @@ const CHECKS: Record<string, CheckFn> = {
     return { passed: score >= 2, logs };
   },
 
-  // --- CI/CD ---
+  // ---------- CI/CD ----------
 
   ci_workflow: async (ctx) => {
     const logs: string[] = [];
@@ -505,7 +446,11 @@ const CHECKS: Record<string, CheckFn> = {
     }
     logs.push(`✔ Найдено workflow-файлов: ${wfFiles.length}`);
     for (const f of wfFiles.slice(0, 3)) logs.push(`  → ${f.path}`);
-    await loadWorkflowTexts(ctx);
+    try {
+      await loadWorkflowTexts(ctx);
+    } catch (e) {
+      logs.push(`⚠ Не удалось загрузить workflow: ${(e as Error).message}`);
+    }
     return { passed: true, logs };
   },
 
@@ -550,9 +495,7 @@ const CHECKS: Record<string, CheckFn> = {
     const texts = await loadWorkflowTexts(ctx);
     const all = Object.values(texts).join('\n').toLowerCase();
     const hasCache =
-      /actions\/cache|actions\/setup-node.*cache|setup-node@.*cache|cache:.*npm|cache:.*pnpm/.test(
-        all,
-      );
+      /actions\/cache|setup-node.*cache|cache:.*npm|cache:.*pnpm/.test(all);
     logs.push(
       hasCache ? '✔ Кэш зависимостей настроен' : '⚠ Кэш не обнаружен (не критично)',
     );
@@ -571,8 +514,6 @@ const CHECKS: Record<string, CheckFn> = {
     return { passed: hasDeploy, logs };
   },
 };
-
-// ---------- Точка входа ----------
 
 export async function runVerification(
   repoUrl: string,
@@ -641,8 +582,8 @@ export async function runVerification(
   const [commits, rootContents, readme, packageRaw, tree] = await Promise.all([
     getCommits(ref.owner, ref.repo).catch(() => []),
     getRootContents(ref.owner, ref.repo).catch(() => []),
-    getReadme(ref.owner, ref.repo),
-    getFileText(ref.owner, ref.repo, 'package.json'),
+    getReadme(ref.owner, ref.repo).catch(() => null),
+    getFileText(ref.owner, ref.repo, 'package.json').catch(() => null),
     listTree(ref.owner, ref.repo),
   ]);
 
@@ -679,7 +620,20 @@ export async function runVerification(
       };
     } else {
       try {
-        result = await check(ctx);
+        // Жёсткий таймаут на фазу, чтобы один краш не съел весь запрос
+        result = await Promise.race<CheckResult>([
+          check(ctx),
+          new Promise<CheckResult>((resolve) =>
+            setTimeout(
+              () =>
+                resolve({
+                  passed: false,
+                  logs: ['✘ Фаза превысила лимит времени (60с)'],
+                }),
+              60_000,
+            ),
+          ),
+        ]);
       } catch (e) {
         console.error(`[verify] phase "${phase.name}" crashed:`, e);
         result = {

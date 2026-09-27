@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { quests, bossPhases, submissions, heroes } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { runVerification } from '@/lib/verifier';
 import { getCurrentHero } from '@/lib/auth';
+import { awardQuestArtifacts } from '@/lib/loot';
 import type { VerifyResponse } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -44,7 +45,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Тянем фазы квеста из БД
     const phases = await db
       .select({
         phaseOrder: bossPhases.phaseOrder,
@@ -60,10 +60,14 @@ export async function POST(req: NextRequest) {
     console.log('[api/verify] quest:', {
       slug: quest.slug,
       victoryThreshold: quest.victoryThreshold,
-      phasesCount: phases.length,
+      phases: phases.length,
     });
 
-    const report = await runVerification(repoUrl, phases, quest.victoryThreshold);
+    const report = await runVerification(
+      repoUrl,
+      phases,
+      quest.victoryThreshold,
+    );
 
     console.log('[api/verify] result:', {
       totalDamage: report.totalDamage,
@@ -89,14 +93,41 @@ export async function POST(req: NextRequest) {
         .from(heroes)
         .where(eq(heroes.id, hero.id));
 
+      // Есть ли уже победа над этим квестом (не считая текущей сдачи)
+      const priorVictories = await db
+        .select({ id: submissions.id })
+        .from(submissions)
+        .where(
+          and(
+            eq(submissions.heroId, hero.id),
+            eq(submissions.questId, quest.id),
+            eq(submissions.status, 'victory'),
+          ),
+        );
+
+      const repeated = priorVictories.length > 1;
+
+      const xpGain = repeated
+        ? Math.floor(quest.rewardXp * 0.2)
+        : quest.rewardXp;
+      const goldGain = repeated
+        ? Math.floor(quest.rewardGold * 0.2)
+        : quest.rewardGold;
+      const levelGain = repeated ? 0 : 1;
+
       await db
         .update(heroes)
         .set({
-          xp: fresh.xp + quest.rewardXp,
-          gold: fresh.gold + quest.rewardGold,
-          level: fresh.level + 1,
+          xp: fresh.xp + xpGain,
+          gold: fresh.gold + goldGain,
+          level: fresh.level + levelGain,
         })
         .where(eq(heroes.id, hero.id));
+
+      const loot = await awardQuestArtifacts(hero.id, quest.id);
+      report.loot = loot;
+      report.xpGained = xpGain;
+      report.goldGained = goldGain;
     }
 
     return NextResponse.json<VerifyResponse>({

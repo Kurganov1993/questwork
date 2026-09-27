@@ -45,7 +45,7 @@ async function gh<T>(path: string, attempt = 1): Promise<T> {
     res = await fetch(`${GH_API}${path}`, {
       headers,
       cache: 'no-store',
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(20_000),
     });
   } catch (e) {
     const err = e as Error & { cause?: unknown };
@@ -102,6 +102,8 @@ async function gh<T>(path: string, attempt = 1): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// ---------- Типы ----------
+
 export type GhRepo = {
   full_name: string;
   description: string | null;
@@ -132,6 +134,19 @@ export type GhContentItem = {
   size: number;
 };
 
+type GhTreeResponse = {
+  tree: Array<{
+    path: string;
+    mode: string;
+    type: 'blob' | 'tree' | 'commit';
+    sha: string;
+    size?: number;
+  }>;
+  truncated: boolean;
+};
+
+// ---------- Публичные методы ----------
+
 export const getRepo = (owner: string, repo: string) =>
   gh<GhRepo>(`/repos/${owner}/${repo}`);
 
@@ -141,7 +156,66 @@ export const getCommits = (owner: string, repo: string, perPage = 100) =>
 export const getRootContents = (owner: string, repo: string) =>
   gh<GhContentItem[]>(`/repos/${owner}/${repo}/contents/`);
 
-export async function getReadme(owner: string, repo: string): Promise<string | null> {
+/**
+ * Полное дерево репозитория ОДНИМ запросом через Git Trees API.
+ * Быстрее, чем рекурсивный обход Contents API в десятки раз.
+ */
+export async function listTree(
+  owner: string,
+  repo: string,
+): Promise<GhContentItem[]> {
+  let repoMeta: GhRepo;
+  try {
+    repoMeta = await getRepo(owner, repo);
+  } catch {
+    return [];
+  }
+
+  const branch = repoMeta.default_branch || 'main';
+
+  let data: GhTreeResponse;
+  try {
+    data = await gh<GhTreeResponse>(
+      `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+    );
+  } catch (e) {
+    console.error('[listTree] trees API failed:', (e as Error).message);
+    return [];
+  }
+
+  if (!data.tree || !Array.isArray(data.tree)) return [];
+
+  const SKIP_DIRS = [
+    'node_modules',
+    '.git',
+    '.next',
+    'dist',
+    'build',
+    'coverage',
+    '.turbo',
+    '.vercel',
+  ];
+
+  return data.tree
+    .filter((t) => t.type === 'blob')
+    .filter(
+      (t) =>
+        !SKIP_DIRS.some(
+          (d) => t.path.includes(`/${d}/`) || t.path.startsWith(`${d}/`),
+        ),
+    )
+    .map((t) => ({
+      name: t.path.split('/').pop() ?? t.path,
+      path: t.path,
+      type: 'file' as const,
+      size: t.size ?? 0,
+    }));
+}
+
+export async function getReadme(
+  owner: string,
+  repo: string,
+): Promise<string | null> {
   try {
     const data = await gh<{ content: string; encoding: string }>(
       `/repos/${owner}/${repo}/readme`,
@@ -175,30 +249,35 @@ export async function getFileText(
   }
 }
 
-export async function listTree(
+/**
+ * Пакетная загрузка файлов с ограничением параллелизма.
+ * Возвращает карту path → content. Ошибки отдельных файлов игнорируются.
+ */
+export async function getFilesBatch(
   owner: string,
   repo: string,
-  path = '',
-  depth = 0,
-  maxDepth = 3,
-): Promise<GhContentItem[]> {
-  if (depth > maxDepth) return [];
-  let items: GhContentItem[] = [];
-  try {
-    items = await gh<GhContentItem[]>(`/repos/${owner}/${repo}/contents/${path}`);
-  } catch {
-    return [];
+  paths: string[],
+  concurrency = 8,
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const queue = [...paths];
+
+  async function worker() {
+    while (queue.length > 0) {
+      const path = queue.shift();
+      if (!path) return;
+      try {
+        const text = await getFileText(owner, repo, path);
+        if (text !== null) result.set(path, text);
+      } catch {
+        // молча пропускаем — один плохой файл не должен ломать фазу
+      }
+    }
   }
-  if (!Array.isArray(items)) return [];
-  const result: GhContentItem[] = [...items];
-  const dirs = items.filter((i) => i.type === 'dir');
-  for (const d of dirs) {
-    if (
-      ['node_modules', '.git', '.next', 'dist', 'build', 'coverage'].includes(d.name)
-    )
-      continue;
-    const sub = await listTree(owner, repo, d.path, depth + 1, maxDepth);
-    result.push(...sub);
-  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, paths.length) }, worker),
+  );
+
   return result;
 }
