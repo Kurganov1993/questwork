@@ -11,7 +11,9 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
-// ---------- ENUM'ы ----------
+// ============================================================
+// ENUM'ы
+// ============================================================
 
 export const heroClassEnum = pgEnum('hero_class', [
   'frontend_mage',
@@ -37,7 +39,15 @@ export const rarityEnum = pgEnum('rarity', [
   'legendary',
 ]);
 
-// ---------- Герои ----------
+export const questStatusEnum = pgEnum('quest_status', [
+  'draft',
+  'active',
+  'archived',
+]);
+
+// ============================================================
+// Герои
+// ============================================================
 
 export const heroes = pgTable('heroes', {
   id: serial('id').primaryKey(),
@@ -65,7 +75,37 @@ export const sessions = pgTable(
   }),
 );
 
-// ---------- Квесты ----------
+// ============================================================
+// Работодатели (компании-заказчики)
+// ============================================================
+
+export const customers = pgTable('customers', {
+  id: serial('id').primaryKey(),
+  email: varchar('email', { length: 255 }).notNull().unique(),
+  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+  companyName: varchar('company_name', { length: 128 }).notNull(),
+  slug: varchar('slug', { length: 64 }).notNull().unique(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export const customerSessions = pgTable(
+  'customer_sessions',
+  {
+    id: varchar('id', { length: 64 }).primaryKey(),
+    customerId: integer('customer_id')
+      .notNull()
+      .references(() => customers.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    expiresAt: timestamp('expires_at').notNull(),
+  },
+  (t) => ({
+    customerIdx: index('customer_sessions_customer_idx').on(t.customerId),
+  }),
+);
+
+// ============================================================
+// Квесты
+// ============================================================
 
 export const quests = pgTable('quests', {
   id: serial('id').primaryKey(),
@@ -79,6 +119,10 @@ export const quests = pgTable('quests', {
   rewardXp: integer('reward_xp').notNull().default(100),
   rewardGold: integer('reward_gold').notNull().default(10),
   victoryThreshold: integer('victory_threshold').notNull().default(85),
+  customerId: integer('customer_id').references(() => customers.id, {
+    onDelete: 'cascade',
+  }),
+  status: questStatusEnum('status').notNull().default('active'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
@@ -94,7 +138,9 @@ export const bossPhases = pgTable('boss_phases', {
   maxHp: integer('max_hp').notNull(),
 });
 
-// ---------- Сдачи ----------
+// ============================================================
+// Сдачи
+// ============================================================
 
 export const submissions = pgTable('submissions', {
   id: serial('id').primaryKey(),
@@ -111,7 +157,9 @@ export const submissions = pgTable('submissions', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
-// ---------- Артефакты ----------
+// ============================================================
+// Артефакты (лут)
+// ============================================================
 
 export const artifacts = pgTable('artifacts', {
   id: serial('id').primaryKey(),
@@ -145,7 +193,9 @@ export const heroArtifacts = pgTable(
   }),
 );
 
-// ---------- Достижения ----------
+// ============================================================
+// Достижения
+// ============================================================
 
 export const achievements = pgTable('achievements', {
   id: serial('id').primaryKey(),
@@ -153,9 +203,7 @@ export const achievements = pgTable('achievements', {
   name: varchar('name', { length: 128 }).notNull(),
   description: text('description').notNull(),
   icon: varchar('icon', { length: 8 }).notNull().default('🏆'),
-  // Тип условия: victories_total, bosses_unique, clean_eslint, speedrun и т.д.
   conditionType: varchar('condition_type', { length: 64 }).notNull(),
-  // Параметр условия (число, slug квеста и т.п.)
   conditionValue: varchar('condition_value', { length: 128 }),
   xpReward: integer('xp_reward').notNull().default(0),
   goldReward: integer('gold_reward').notNull().default(0),
@@ -181,6 +229,9 @@ export const heroAchievements = pgTable(
   }),
 );
 
-// ---------- Типы ----------
+// ============================================================
+// Типы
+// ============================================================
 
 export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';
+export type QuestStatus = 'draft' | 'active' | 'archived';

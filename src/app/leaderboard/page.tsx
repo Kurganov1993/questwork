@@ -166,7 +166,10 @@ export default async function LeaderboardPage({
 
                   <div className="text-2xl">{cls?.icon ?? '🧙'}</div>
 
-                  <div className="flex-1 min-w-0">
+                                    <Link
+                    href={`/u/${r.nickname}`}
+                    className="flex-1 min-w-0 hover:opacity-90"
+                  >
                     <div className="flex items-center gap-2">
                       <span
                         className={`font-medium truncate ${
@@ -184,7 +187,7 @@ export default async function LeaderboardPage({
                     <div className="text-xs text-zinc-500">
                       {cls?.label ?? r.heroClass}
                     </div>
-                  </div>
+                  </Link>
 
                   <div className="flex gap-4 text-sm shrink-0">
                     <div className="text-center min-w-[44px]">

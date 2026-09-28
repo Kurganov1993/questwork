@@ -35,7 +35,7 @@ export default async function RootLayout({
             <span className="font-semibold tracking-wide">QUESTWORK</span>
           </Link>
 
-          <nav className="flex items-center gap-5 text-sm">
+           <nav className="flex items-center gap-5 text-sm">
             <Link href="/quests" className="text-zinc-400 hover:text-amber-400">
               Квесты
             </Link>
@@ -44,6 +44,12 @@ export default async function RootLayout({
               className="text-zinc-400 hover:text-amber-400"
             >
               Лидерборд
+            </Link>
+            <Link
+              href="/employer"
+              className="text-zinc-400 hover:text-amber-400"
+            >
+              Работодателям
             </Link>
 
             {hero ? (

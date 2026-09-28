@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
-import { eq, and, desc } from 'drizzle-orm';
+import { notFound } from 'next/navigation';
+import { eq, desc, and, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import {
+  heroes,
   submissions,
   quests,
   heroArtifacts,
@@ -10,44 +11,48 @@ import {
   heroAchievements,
   achievements as achievementsTable,
 } from '@/db/schema';
-import { getCurrentHero } from '@/lib/auth';
 import { HERO_CLASSES } from '@/lib/constants';
-import { LogoutButton } from '@/components/LogoutButton';
 import { LootCard } from '@/components/LootCard';
 import { AchievementCard } from '@/components/AchievementCard';
-import { awardQuestArtifacts } from '@/lib/loot';
 import type { LootItem, EarnedAchievementItem } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-export default async function HeroPage() {
-  const hero = await getCurrentHero();
-  if (!hero) redirect('/login');
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ nickname: string }>;
+}) {
+  const { nickname } = await params;
+  const [hero] = await db
+    .select({ nickname: heroes.nickname, level: heroes.level })
+    .from(heroes)
+    .where(eq(heroes.nickname, nickname));
 
-  // Досылаем лут за прошлые победы, если БД упала в момент награды.
-  // awardQuestArtifacts идемпотентен — повторные вызовы безопасны.
-  try {
-    const victorySubs = await db
-      .select({ questId: submissions.questId })
-      .from(submissions)
-      .where(
-        and(
-          eq(submissions.heroId, hero.id),
-          eq(submissions.status, 'victory'),
-        ),
-      )
-      .groupBy(submissions.questId);
+  if (!hero) return { title: 'Герой не найден · QuestWork' };
+  return {
+    title: `${hero.nickname} · ур. ${hero.level} · QuestWork`,
+    description: `Профиль героя ${hero.nickname} на QuestWork.`,
+  };
+}
 
-    for (const v of victorySubs) {
-      await awardQuestArtifacts(hero.id, v.questId);
-    }
-  } catch (e) {
-    console.warn('[hero] loot backfill failed:', (e as Error).message);
-  }
+export default async function PublicHeroPage({
+  params,
+}: {
+  params: Promise<{ nickname: string }>;
+}) {
+  const { nickname } = await params;
+
+  const [hero] = await db
+    .select()
+    .from(heroes)
+    .where(eq(heroes.nickname, nickname));
+
+  if (!hero) notFound();
 
   const cls = HERO_CLASSES.find((c) => c.value === hero.heroClass);
 
-  const mySubs = await db
+  const subs = await db
     .select({
       id: submissions.id,
       repoUrl: submissions.repoUrl,
@@ -98,16 +103,45 @@ export default async function HeroPage() {
     .where(eq(heroAchievements.heroId, hero.id))
     .orderBy(desc(heroAchievements.earnedAt));
 
-  const victories = mySubs.filter((s) => s.status === 'victory').length;
+  const [stats] = await db
+    .select({
+      victories: sql<number>`count(*) filter (where ${submissions.status} = 'victory')::int`,
+      defeats: sql<number>`count(*) filter (where ${submissions.status} = 'defeat')::int`,
+      total: sql<number>`count(*)::int`,
+    })
+    .from(submissions)
+    .where(eq(submissions.heroId, hero.id));
+
+  const totalSubs = Number(stats?.total ?? 0);
+  const victoriesCount = Number(stats?.victories ?? 0);
+  const defeatsCount = Number(stats?.defeats ?? 0);
+  const winRate =
+    totalSubs > 0 ? Math.round((victoriesCount / totalSubs) * 100) : 0;
+
+  const uniqueBosses = await db
+    .select({ questId: submissions.questId })
+    .from(submissions)
+    .where(
+      and(
+        eq(submissions.heroId, hero.id),
+        eq(submissions.status, 'victory'),
+      ),
+    )
+    .groupBy(submissions.questId);
+
+  const registeredAt = new Date(hero.createdAt).toLocaleDateString('ru-RU', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-6 py-10">
       <div className="max-w-3xl mx-auto">
-        <Link href="/" className="text-sm text-zinc-500 hover:text-amber-400">
-          ← На главную
+        <Link href="/leaderboard" className="text-sm text-zinc-500 hover:text-amber-400">
+          ← Лидерборд
         </Link>
 
-        {/* Карточка героя */}
         <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-6">
           <div className="flex items-start gap-5">
             <div className="text-6xl">{cls?.icon ?? '🧙'}</div>
@@ -116,7 +150,11 @@ export default async function HeroPage() {
                 {cls?.label ?? hero.heroClass}
               </div>
               <h1 className="text-3xl font-bold">{hero.nickname}</h1>
-              <div className="flex flex-wrap gap-6 mt-3 text-sm">
+              <div className="text-xs text-zinc-500 mt-1">
+                В гильдии с {registeredAt}
+              </div>
+
+              <div className="flex flex-wrap gap-6 mt-4 text-sm">
                 <div>
                   <div className="text-zinc-500">Уровень</div>
                   <div className="text-2xl font-semibold text-amber-400">
@@ -128,25 +166,45 @@ export default async function HeroPage() {
                   <div className="text-2xl font-semibold">{hero.xp}</div>
                 </div>
                 <div>
-                  <div className="text-zinc-500">Золото</div>
-                  <div className="text-2xl font-semibold">🪙 {hero.gold}</div>
-                </div>
-                <div>
                   <div className="text-zinc-500">Победы</div>
                   <div className="text-2xl font-semibold text-emerald-400">
-                    {victories}
+                    {victoriesCount}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-zinc-500">Win rate</div>
+                  <div className="text-2xl font-semibold">{winRate}%</div>
+                </div>
+                <div>
+                  <div className="text-zinc-500">Боссов</div>
+                  <div className="text-2xl font-semibold">
+                    {uniqueBosses.length}
                   </div>
                 </div>
               </div>
             </div>
-                        <div className="flex flex-col items-end gap-2">
-              <Link
-                href={`/u/${hero.nickname}`}
-                className="text-xs text-zinc-500 hover:text-amber-400 transition"
-              >
-                Публичный профиль →
-              </Link>
-              <LogoutButton />
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-zinc-800/60 text-xs">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-center">
+              <div className="text-zinc-500 mb-1">Всего заходов</div>
+              <div className="text-lg font-semibold">{totalSubs}</div>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-center">
+              <div className="text-zinc-500 mb-1">Побед</div>
+              <div className="text-lg font-semibold text-emerald-400">
+                {victoriesCount}
+              </div>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-center">
+              <div className="text-zinc-500 mb-1">Поражений</div>
+              <div className="text-lg font-semibold text-red-400">
+                {defeatsCount}
+              </div>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-center">
+              <div className="text-zinc-500 mb-1">Золото</div>
+              <div className="text-lg font-semibold">🪙 {hero.gold}</div>
             </div>
           </div>
         </div>
@@ -158,7 +216,7 @@ export default async function HeroPage() {
 
         {myArtifacts.length === 0 ? (
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 text-zinc-500 text-sm">
-            Пока пусто. Победи босса — получишь свой первый артефакт.
+            Герой ещё не добыл ни одного артефакта.
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -184,7 +242,7 @@ export default async function HeroPage() {
 
         {myAchievements.length === 0 ? (
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 text-zinc-500 text-sm">
-            Пока нет достижений. Победи босса — и откроются первые бейджи.
+            Пока нет достижений.
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -208,16 +266,13 @@ export default async function HeroPage() {
           ИСТОРИЯ ПОХОДОВ
         </h2>
 
-        {mySubs.length === 0 ? (
+        {subs.length === 0 ? (
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-6 text-zinc-500 text-sm">
-            Ты ещё не сдавал квесты. Пора начинать.{' '}
-            <Link href="/quests" className="text-amber-400 hover:text-amber-300">
-              К доске квестов →
-            </Link>
+            Герой пока не сдавал квесты.
           </div>
         ) : (
           <div className="space-y-2">
-            {mySubs.map((s) => {
+            {subs.map((s) => {
               const pct = Math.round(
                 (s.damageDealt / (s.bossMaxHp || 110)) * 100,
               );
@@ -232,9 +287,12 @@ export default async function HeroPage() {
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-                    <div className="font-medium">
+                    <Link
+                      href={`/quests/${s.questSlug}`}
+                      className="font-medium hover:text-amber-400"
+                    >
                       {s.questTitle ?? 'Квест'}
-                    </div>
+                    </Link>
                     <div
                       className={`text-xs px-2 py-0.5 rounded ${
                         victory
@@ -245,9 +303,14 @@ export default async function HeroPage() {
                       {victory ? 'победа' : 'поражение'} · {pct}%
                     </div>
                   </div>
-                  <div className="text-xs text-zinc-500 font-mono truncate">
+                  <a
+                    href={s.repoUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-zinc-500 font-mono truncate block hover:text-amber-400"
+                  >
                     {s.repoUrl}
-                  </div>
+                  </a>
                   <div className="text-xs text-zinc-600 mt-1">
                     {new Date(s.createdAt).toLocaleString('ru-RU')}
                   </div>
@@ -256,6 +319,10 @@ export default async function HeroPage() {
             })}
           </div>
         )}
+
+        <footer className="mt-12 pt-6 border-t border-zinc-800/60 text-center text-xs text-zinc-600">
+          Профиль сгенерирован QuestWork · найм как рейд
+        </footer>
       </div>
     </main>
   );
