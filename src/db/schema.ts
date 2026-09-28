@@ -145,6 +145,42 @@ export const heroArtifacts = pgTable(
   }),
 );
 
+// ---------- Достижения ----------
+
+export const achievements = pgTable('achievements', {
+  id: serial('id').primaryKey(),
+  slug: varchar('slug', { length: 64 }).notNull().unique(),
+  name: varchar('name', { length: 128 }).notNull(),
+  description: text('description').notNull(),
+  icon: varchar('icon', { length: 8 }).notNull().default('🏆'),
+  // Тип условия: victories_total, bosses_unique, clean_eslint, speedrun и т.д.
+  conditionType: varchar('condition_type', { length: 64 }).notNull(),
+  // Параметр условия (число, slug квеста и т.п.)
+  conditionValue: varchar('condition_value', { length: 128 }),
+  xpReward: integer('xp_reward').notNull().default(0),
+  goldReward: integer('gold_reward').notNull().default(0),
+});
+
+export const heroAchievements = pgTable(
+  'hero_achievements',
+  {
+    id: serial('id').primaryKey(),
+    heroId: integer('hero_id')
+      .notNull()
+      .references(() => heroes.id, { onDelete: 'cascade' }),
+    achievementId: integer('achievement_id')
+      .notNull()
+      .references(() => achievements.id, { onDelete: 'cascade' }),
+    earnedAt: timestamp('earned_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqHeroAchievement: uniqueIndex('hero_achievement_unique').on(
+      t.heroId,
+      t.achievementId,
+    ),
+  }),
+);
+
 // ---------- Типы ----------
 
 export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';

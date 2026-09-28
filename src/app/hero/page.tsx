@@ -1,19 +1,49 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { eq, desc } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { db } from '@/db';
-import { submissions, quests, heroArtifacts, artifacts } from '@/db/schema';
+import {
+  submissions,
+  quests,
+  heroArtifacts,
+  artifacts,
+  heroAchievements,
+  achievements as achievementsTable,
+} from '@/db/schema';
 import { getCurrentHero } from '@/lib/auth';
 import { HERO_CLASSES } from '@/lib/constants';
 import { LogoutButton } from '@/components/LogoutButton';
 import { LootCard } from '@/components/LootCard';
-import type { LootItem } from '@/lib/types';
+import { AchievementCard } from '@/components/AchievementCard';
+import { awardQuestArtifacts } from '@/lib/loot';
+import type { LootItem, EarnedAchievementItem } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
 export default async function HeroPage() {
   const hero = await getCurrentHero();
   if (!hero) redirect('/login');
+
+  // Досылаем лут за прошлые победы, если БД упала в момент награды.
+  // awardQuestArtifacts идемпотентен — повторные вызовы безопасны.
+  try {
+    const victorySubs = await db
+      .select({ questId: submissions.questId })
+      .from(submissions)
+      .where(
+        and(
+          eq(submissions.heroId, hero.id),
+          eq(submissions.status, 'victory'),
+        ),
+      )
+      .groupBy(submissions.questId);
+
+    for (const v of victorySubs) {
+      await awardQuestArtifacts(hero.id, v.questId);
+    }
+  } catch (e) {
+    console.warn('[hero] loot backfill failed:', (e as Error).message);
+  }
 
   const cls = HERO_CLASSES.find((c) => c.value === hero.heroClass);
 
@@ -49,6 +79,25 @@ export default async function HeroPage() {
     .where(eq(heroArtifacts.heroId, hero.id))
     .orderBy(desc(heroArtifacts.earnedAt));
 
+  const myAchievements = await db
+    .select({
+      id: achievementsTable.id,
+      slug: achievementsTable.slug,
+      name: achievementsTable.name,
+      description: achievementsTable.description,
+      icon: achievementsTable.icon,
+      xpReward: achievementsTable.xpReward,
+      goldReward: achievementsTable.goldReward,
+      earnedAt: heroAchievements.earnedAt,
+    })
+    .from(heroAchievements)
+    .innerJoin(
+      achievementsTable,
+      eq(achievementsTable.id, heroAchievements.achievementId),
+    )
+    .where(eq(heroAchievements.heroId, hero.id))
+    .orderBy(desc(heroAchievements.earnedAt));
+
   const victories = mySubs.filter((s) => s.status === 'victory').length;
 
   return (
@@ -58,6 +107,7 @@ export default async function HeroPage() {
           ← На главную
         </Link>
 
+        {/* Карточка героя */}
         <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-6">
           <div className="flex items-start gap-5">
             <div className="text-6xl">{cls?.icon ?? '🧙'}</div>
@@ -93,6 +143,7 @@ export default async function HeroPage() {
           </div>
         </div>
 
+        {/* Артефакты */}
         <h2 className="text-sm text-zinc-500 tracking-widest mt-8 mb-3">
           АРТЕФАКТЫ · {myArtifacts.length}
         </h2>
@@ -118,6 +169,33 @@ export default async function HeroPage() {
           </div>
         )}
 
+        {/* Достижения */}
+        <h2 className="text-sm text-zinc-500 tracking-widest mt-8 mb-3">
+          ДОСТИЖЕНИЯ · {myAchievements.length}
+        </h2>
+
+        {myAchievements.length === 0 ? (
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 text-zinc-500 text-sm">
+            Пока нет достижений. Победи босса — и откроются первые бейджи.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {myAchievements.map((a) => {
+              const item: EarnedAchievementItem = {
+                id: a.id,
+                slug: a.slug,
+                name: a.name,
+                description: a.description,
+                icon: a.icon,
+                xpReward: a.xpReward,
+                goldReward: a.goldReward,
+              };
+              return <AchievementCard key={a.id} item={item} compact />;
+            })}
+          </div>
+        )}
+
+        {/* История походов */}
         <h2 className="text-sm text-zinc-500 tracking-widest mt-8 mb-3">
           ИСТОРИЯ ПОХОДОВ
         </h2>

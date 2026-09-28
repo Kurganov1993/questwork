@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { BossHpBar } from '@/components/BossHpBar';
 import { PhaseLog } from '@/components/PhaseLog';
 import { LootCard } from '@/components/LootCard';
+import { AchievementCard } from '@/components/AchievementCard';
 import type { VerifyReport } from '@/lib/types';
 
 export function VerifyClient({
@@ -23,6 +24,7 @@ export function VerifyClient({
   const [visiblePhases, setVisiblePhases] = useState(0);
   const [report, setReport] = useState<VerifyReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const maxHp = report?.bossMaxHp ?? bossMaxHp;
@@ -43,6 +45,18 @@ export function VerifyClient({
     };
   }, [loading, phaseNames.length]);
 
+  useEffect(() => {
+    if (!loading) {
+      setElapsed(0);
+      return;
+    }
+    const started = Date.now();
+    const id = setInterval(() => {
+      setElapsed(Math.round((Date.now() - started) / 1000));
+    }, 500);
+    return () => clearInterval(id);
+  }, [loading]);
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -62,6 +76,7 @@ export function VerifyClient({
       if (!data.ok) {
         setError(data.error ?? 'Ошибка проверки');
       } else {
+        console.log('[verify] report:', data.report);
         setTimeout(() => setReport(data.report), 500);
       }
     } catch {
@@ -112,18 +127,29 @@ export function VerifyClient({
       </div>
 
       {loading && (
-        <div className="mb-6 space-y-2">
-          {phaseNames.map((name, i) => (
-            <div
-              key={name}
-              className={`text-sm flex items-center gap-2 transition ${
-                i < visiblePhases ? 'text-zinc-300' : 'text-zinc-700'
-              }`}
-            >
-              <span>{i < visiblePhases ? '⚔️' : '·'}</span>
-              <span>{name}</span>
+        <div className="mb-6 space-y-3">
+          <div className="flex items-center justify-between text-xs text-zinc-500">
+            <span>Проверка идёт…</span>
+            <span className="font-mono">{elapsed}s</span>
+          </div>
+          <div className="space-y-2">
+            {phaseNames.map((name, i) => (
+              <div
+                key={name}
+                className={`text-sm flex items-center gap-2 transition ${
+                  i < visiblePhases ? 'text-zinc-300' : 'text-zinc-700'
+                }`}
+              >
+                <span>{i < visiblePhases ? '⚔️' : '·'}</span>
+                <span>{name}</span>
+              </div>
+            ))}
+          </div>
+          {elapsed > 30 && (
+            <div className="text-xs text-amber-400/80 bg-amber-950/20 border border-amber-800/40 rounded-md p-2">
+              Долго? Первый запуск Semgrep качает бинарь. Подожди до 2 минут.
             </div>
-          ))}
+          )}
         </div>
       )}
 
@@ -142,13 +168,23 @@ export function VerifyClient({
             <div className="text-sm text-zinc-300 mb-3">{report.summary}</div>
 
             {report.victory && (
-              <div className="flex gap-4 text-sm pt-3 border-t border-emerald-800/40">
+              <div className="flex gap-4 text-sm pt-3 border-t border-emerald-800/40 flex-wrap">
                 {report.xpGained !== undefined && (
                   <div className="text-amber-400">✨ +{report.xpGained} XP</div>
                 )}
                 {report.goldGained !== undefined && (
                   <div className="text-amber-400">🪙 +{report.goldGained}</div>
                 )}
+                {report.achievementXp ? (
+                  <div className="text-amber-300">
+                    🏆 +{report.achievementXp} XP за достижения
+                  </div>
+                ) : null}
+                {report.achievementGold ? (
+                  <div className="text-amber-300">
+                    🏆 +{report.achievementGold} золота за достижения
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
@@ -159,6 +195,19 @@ export function VerifyClient({
               <div className="space-y-2">
                 {report.loot.map((item) => (
                   <LootCard key={item.id} item={item} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {report.achievementsGained && report.achievementsGained.length > 0 && (
+            <div>
+              <h2 className="text-sm text-zinc-500 tracking-widest mb-3">
+                ДОСТИЖЕНИЯ
+              </h2>
+              <div className="space-y-2">
+                {report.achievementsGained.map((a) => (
+                  <AchievementCard key={a.id} item={a} />
                 ))}
               </div>
             </div>

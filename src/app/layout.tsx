@@ -18,11 +18,15 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const hero = await getCurrentHero();
-  const cls = hero ? HERO_CLASSES.find((c) => c.value === hero.heroClass) : null;
+  const cls = hero
+    ? HERO_CLASSES.find((c) => c.value === hero.heroClass)
+    : null;
 
   return (
     <html lang="ru" className="dark">
-      <body className={`${inter.className} bg-zinc-950 text-zinc-100 antialiased`}>
+      <body
+        className={`${inter.className} bg-zinc-950 text-zinc-100 antialiased`}
+      >
         <header className="border-b border-zinc-800/60 px-6 py-3 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-md bg-amber-500/20 border border-amber-500/40 grid place-items-center text-amber-400 font-bold">
@@ -32,8 +36,14 @@ export default async function RootLayout({
           </Link>
 
           <nav className="flex items-center gap-5 text-sm">
-            <Link href="/verify" className="text-zinc-400 hover:text-amber-400">
+            <Link href="/quests" className="text-zinc-400 hover:text-amber-400">
               Квесты
+            </Link>
+            <Link
+              href="/leaderboard"
+              className="text-zinc-400 hover:text-amber-400"
+            >
+              Лидерборд
             </Link>
 
             {hero ? (
@@ -43,12 +53,17 @@ export default async function RootLayout({
               >
                 <span className="text-lg">{cls?.icon ?? '🧙'}</span>
                 <span className="text-zinc-300">{hero.nickname}</span>
-                <span className="text-xs text-amber-400">ур. {hero.level}</span>
+                <span className="text-xs text-amber-400">
+                  ур. {hero.level}
+                </span>
                 <span className="text-xs text-zinc-400">🪙 {hero.gold}</span>
               </Link>
             ) : (
               <>
-                <Link href="/login" className="text-zinc-400 hover:text-amber-400">
+                <Link
+                  href="/login"
+                  className="text-zinc-400 hover:text-amber-400"
+                >
                   Войти
                 </Link>
                 <Link

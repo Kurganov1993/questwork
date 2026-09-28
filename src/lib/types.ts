@@ -39,6 +39,16 @@ export type LootItem = {
   isNew: boolean;
 };
 
+export type EarnedAchievementItem = {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  icon: string;
+  xpReward: number;
+  goldReward: number;
+};
+
 export type VerifyReport = {
   repoUrl: string;
   totalDamage: number;
@@ -49,6 +59,9 @@ export type VerifyReport = {
   loot?: LootItem[];
   xpGained?: number;
   goldGained?: number;
+  achievementsGained?: EarnedAchievementItem[];
+  achievementXp?: number;
+  achievementGold?: number;
 };
 
 export type VerifyResponse =
