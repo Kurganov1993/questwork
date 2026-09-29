@@ -154,6 +154,10 @@ export const submissions = pgTable('submissions', {
   status: submissionStatusEnum('status').notNull().default('pending'),
   damageDealt: integer('damage_dealt').notNull().default(0),
   report: jsonb('report'),
+  employerStatus: varchar('employer_status', { length: 32 }),
+  employerNote: text('employer_note'),
+  employerStatusAt: timestamp('employer_status_at'),
+  heroSeenAt: timestamp('hero_seen_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 

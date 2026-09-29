@@ -16,9 +16,41 @@ import { LogoutButton } from '@/components/LogoutButton';
 import { LootCard } from '@/components/LootCard';
 import { AchievementCard } from '@/components/AchievementCard';
 import { awardQuestArtifacts } from '@/lib/loot';
+import { withRetry } from '@/lib/db-retry';
 import type { LootItem, EarnedAchievementItem } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+
+function employerStatusLabel(status: string | null): string | null {
+  if (!status) return null;
+  switch (status) {
+    case 'shortlisted':
+      return 'в шортлисте';
+    case 'interview':
+      return 'приглашает на интервью';
+    case 'hired':
+      return 'нанял';
+    case 'rejected':
+      return 'отказ';
+    default:
+      return status;
+  }
+}
+
+function employerStatusStyle(status: string | null): string {
+  switch (status) {
+    case 'hired':
+      return 'bg-emerald-500/20 text-emerald-300 border-emerald-700/40';
+    case 'rejected':
+      return 'bg-red-500/20 text-red-300 border-red-700/40';
+    case 'interview':
+      return 'bg-amber-500/20 text-amber-300 border-amber-700/40';
+    case 'shortlisted':
+      return 'bg-blue-500/20 text-blue-300 border-blue-700/40';
+    default:
+      return 'bg-zinc-500/20 text-zinc-300 border-zinc-700/40';
+  }
+}
 
 export default async function HeroPage() {
   const hero = await getCurrentHero();
@@ -27,16 +59,20 @@ export default async function HeroPage() {
   // Досылаем лут за прошлые победы, если БД упала в момент награды.
   // awardQuestArtifacts идемпотентен — повторные вызовы безопасны.
   try {
-    const victorySubs = await db
-      .select({ questId: submissions.questId })
-      .from(submissions)
-      .where(
-        and(
-          eq(submissions.heroId, hero.id),
-          eq(submissions.status, 'victory'),
-        ),
-      )
-      .groupBy(submissions.questId);
+    const victorySubs = await withRetry(
+      () =>
+        db
+          .select({ questId: submissions.questId })
+          .from(submissions)
+          .where(
+            and(
+              eq(submissions.heroId, hero.id),
+              eq(submissions.status, 'victory'),
+            ),
+          )
+          .groupBy(submissions.questId),
+      { label: 'hero:backfill-victories' },
+    );
 
     for (const v of victorySubs) {
       await awardQuestArtifacts(hero.id, v.questId);
@@ -47,58 +83,75 @@ export default async function HeroPage() {
 
   const cls = HERO_CLASSES.find((c) => c.value === hero.heroClass);
 
-  const mySubs = await db
-    .select({
-      id: submissions.id,
-      repoUrl: submissions.repoUrl,
-      status: submissions.status,
-      damageDealt: submissions.damageDealt,
-      createdAt: submissions.createdAt,
-      questTitle: quests.title,
-      questSlug: quests.slug,
-      bossMaxHp: quests.bossMaxHp,
-    })
-    .from(submissions)
-    .leftJoin(quests, eq(quests.id, submissions.questId))
-    .where(eq(submissions.heroId, hero.id))
-    .orderBy(desc(submissions.createdAt))
-    .limit(20);
+  const mySubs = await withRetry(
+    () =>
+      db
+        .select({
+          id: submissions.id,
+          repoUrl: submissions.repoUrl,
+          status: submissions.status,
+          damageDealt: submissions.damageDealt,
+          createdAt: submissions.createdAt,
+          employerStatus: submissions.employerStatus,
+          employerNote: submissions.employerNote,
+          questTitle: quests.title,
+          questSlug: quests.slug,
+          bossMaxHp: quests.bossMaxHp,
+        })
+        .from(submissions)
+        .leftJoin(quests, eq(quests.id, submissions.questId))
+        .where(eq(submissions.heroId, hero.id))
+        .orderBy(desc(submissions.createdAt))
+        .limit(20),
+    { label: 'hero:list-subs' },
+  );
 
-  const myArtifacts = await db
-    .select({
-      id: artifacts.id,
-      slug: artifacts.slug,
-      name: artifacts.name,
-      description: artifacts.description,
-      icon: artifacts.icon,
-      rarity: artifacts.rarity,
-      earnedAt: heroArtifacts.earnedAt,
-    })
-    .from(heroArtifacts)
-    .innerJoin(artifacts, eq(artifacts.id, heroArtifacts.artifactId))
-    .where(eq(heroArtifacts.heroId, hero.id))
-    .orderBy(desc(heroArtifacts.earnedAt));
+  const myArtifacts = await withRetry(
+    () =>
+      db
+        .select({
+          id: artifacts.id,
+          slug: artifacts.slug,
+          name: artifacts.name,
+          description: artifacts.description,
+          icon: artifacts.icon,
+          rarity: artifacts.rarity,
+          earnedAt: heroArtifacts.earnedAt,
+        })
+        .from(heroArtifacts)
+        .innerJoin(artifacts, eq(artifacts.id, heroArtifacts.artifactId))
+        .where(eq(heroArtifacts.heroId, hero.id))
+        .orderBy(desc(heroArtifacts.earnedAt)),
+    { label: 'hero:list-artifacts' },
+  );
 
-  const myAchievements = await db
-    .select({
-      id: achievementsTable.id,
-      slug: achievementsTable.slug,
-      name: achievementsTable.name,
-      description: achievementsTable.description,
-      icon: achievementsTable.icon,
-      xpReward: achievementsTable.xpReward,
-      goldReward: achievementsTable.goldReward,
-      earnedAt: heroAchievements.earnedAt,
-    })
-    .from(heroAchievements)
-    .innerJoin(
-      achievementsTable,
-      eq(achievementsTable.id, heroAchievements.achievementId),
-    )
-    .where(eq(heroAchievements.heroId, hero.id))
-    .orderBy(desc(heroAchievements.earnedAt));
+  const myAchievements = await withRetry(
+    () =>
+      db
+        .select({
+          id: achievementsTable.id,
+          slug: achievementsTable.slug,
+          name: achievementsTable.name,
+          description: achievementsTable.description,
+          icon: achievementsTable.icon,
+          xpReward: achievementsTable.xpReward,
+          goldReward: achievementsTable.goldReward,
+          earnedAt: heroAchievements.earnedAt,
+        })
+        .from(heroAchievements)
+        .innerJoin(
+          achievementsTable,
+          eq(achievementsTable.id, heroAchievements.achievementId),
+        )
+        .where(eq(heroAchievements.heroId, hero.id))
+        .orderBy(desc(heroAchievements.earnedAt)),
+    { label: 'hero:list-achievements' },
+  );
 
   const victories = mySubs.filter((s) => s.status === 'victory').length;
+  const invitations = mySubs.filter(
+    (s) => s.employerStatus === 'interview' || s.employerStatus === 'hired',
+  ).length;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-6 py-10">
@@ -137,9 +190,23 @@ export default async function HeroPage() {
                     {victories}
                   </div>
                 </div>
+                {invitations > 0 && (
+                  <div>
+                    <div className="text-zinc-500">Приглашения</div>
+                    <div className="text-2xl font-semibold text-amber-400">
+                      {invitations}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
                         <div className="flex flex-col items-end gap-2">
+              <Link
+                href="/hero/invitations"
+                className="text-xs text-zinc-500 hover:text-amber-400 transition"
+              >
+                Приглашения от компаний →
+              </Link>
               <Link
                 href={`/u/${hero.nickname}`}
                 className="text-xs text-zinc-500 hover:text-amber-400 transition"
@@ -211,7 +278,10 @@ export default async function HeroPage() {
         {mySubs.length === 0 ? (
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-6 text-zinc-500 text-sm">
             Ты ещё не сдавал квесты. Пора начинать.{' '}
-            <Link href="/quests" className="text-amber-400 hover:text-amber-300">
+            <Link
+              href="/quests"
+              className="text-amber-400 hover:text-amber-300"
+            >
               К доске квестов →
             </Link>
           </div>
@@ -222,6 +292,8 @@ export default async function HeroPage() {
                 (s.damageDealt / (s.bossMaxHp || 110)) * 100,
               );
               const victory = s.status === 'victory';
+              const statusLabel = employerStatusLabel(s.employerStatus);
+
               return (
                 <div
                   key={s.id}
@@ -232,9 +304,12 @@ export default async function HeroPage() {
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-                    <div className="font-medium">
+                    <Link
+                      href={s.questSlug ? `/quests/${s.questSlug}` : '#'}
+                      className="font-medium hover:text-amber-400"
+                    >
                       {s.questTitle ?? 'Квест'}
-                    </div>
+                    </Link>
                     <div
                       className={`text-xs px-2 py-0.5 rounded ${
                         victory
@@ -251,6 +326,23 @@ export default async function HeroPage() {
                   <div className="text-xs text-zinc-600 mt-1">
                     {new Date(s.createdAt).toLocaleString('ru-RU')}
                   </div>
+
+                  {s.employerStatus && (
+                    <div className="mt-2 pt-2 border-t border-zinc-800/60">
+                      <span
+                        className={`inline-block text-xs px-2 py-0.5 rounded border ${employerStatusStyle(
+                          s.employerStatus,
+                        )}`}
+                      >
+                        Работодатель: {statusLabel}
+                      </span>
+                      {s.employerNote && (
+                        <div className="text-xs text-zinc-500 mt-1 italic">
+                          «{s.employerNote}»
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}

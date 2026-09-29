@@ -4,6 +4,7 @@ import Link from 'next/link';
 import './globals.css';
 import { getCurrentHero } from '@/lib/auth';
 import { HERO_CLASSES } from '@/lib/constants';
+import { countUnseenNotifications } from '@/lib/notifications';
 
 const inter = Inter({ subsets: ['latin', 'cyrillic'] });
 
@@ -21,6 +22,7 @@ export default async function RootLayout({
   const cls = hero
     ? HERO_CLASSES.find((c) => c.value === hero.heroClass)
     : null;
+  const unseen = hero ? await countUnseenNotifications(hero.id) : 0;
 
   return (
     <html lang="ru" className="dark">
@@ -35,7 +37,7 @@ export default async function RootLayout({
             <span className="font-semibold tracking-wide">QUESTWORK</span>
           </Link>
 
-           <nav className="flex items-center gap-5 text-sm">
+          <nav className="flex items-center gap-5 text-sm">
             <Link href="/quests" className="text-zinc-400 hover:text-amber-400">
               Квесты
             </Link>
@@ -53,17 +55,32 @@ export default async function RootLayout({
             </Link>
 
             {hero ? (
-              <Link
-                href="/hero"
-                className="flex items-center gap-3 rounded-md border border-zinc-800 hover:border-amber-500/60 px-3 py-1.5 transition"
-              >
-                <span className="text-lg">{cls?.icon ?? '🧙'}</span>
-                <span className="text-zinc-300">{hero.nickname}</span>
-                <span className="text-xs text-amber-400">
-                  ур. {hero.level}
-                </span>
-                <span className="text-xs text-zinc-400">🪙 {hero.gold}</span>
-              </Link>
+              <div className="flex items-center gap-3">
+                {unseen > 0 && (
+                  <Link
+                    href="/hero/invitations"
+                    className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs hover:bg-amber-500/20 transition"
+                  >
+                    <span>🔔</span>
+                    <span>Приглашения</span>
+                    <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-amber-500 text-black text-[10px] font-bold">
+                      {unseen}
+                    </span>
+                  </Link>
+                )}
+
+                <Link
+                  href="/hero"
+                  className="flex items-center gap-3 rounded-md border border-zinc-800 hover:border-amber-500/60 px-3 py-1.5 transition"
+                >
+                  <span className="text-lg">{cls?.icon ?? '🧙'}</span>
+                  <span className="text-zinc-300">{hero.nickname}</span>
+                  <span className="text-xs text-amber-400">
+                    ур. {hero.level}
+                  </span>
+                  <span className="text-xs text-zinc-400">🪙 {hero.gold}</span>
+                </Link>
+              </div>
             ) : (
               <>
                 <Link

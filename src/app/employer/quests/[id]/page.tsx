@@ -4,7 +4,8 @@ import { eq, desc, and } from 'drizzle-orm';
 import { db } from '@/db';
 import { quests, bossPhases, submissions, heroes } from '@/db/schema';
 import { getCurrentCustomer } from '@/lib/customer-auth';
-import { HERO_CLASSES } from '@/lib/constants';
+import { EmployerSubmissionRow } from '@/components/EmployerSubmissionRow';
+import { ArchiveQuestButton } from '@/components/ArchiveQuestButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,6 +41,8 @@ export default async function EmployerQuestPage({
       status: submissions.status,
       damageDealt: submissions.damageDealt,
       createdAt: submissions.createdAt,
+      employerStatus: submissions.employerStatus,
+      employerNote: submissions.employerNote,
       heroId: heroes.id,
       heroNickname: heroes.nickname,
       heroClass: heroes.heroClass,
@@ -53,6 +56,22 @@ export default async function EmployerQuestPage({
 
   const victories = subs.filter((s) => s.status === 'victory').length;
   const uniqueHeroes = new Set(subs.map((s) => s.heroId)).size;
+  const shortlisted = subs.filter((s) => s.employerStatus === 'shortlisted').length;
+  const interviews = subs.filter((s) => s.employerStatus === 'interview').length;
+  const hired = subs.filter((s) => s.employerStatus === 'hired').length;
+
+  const statusLabel =
+    quest.status === 'active'
+      ? 'активен'
+      : quest.status === 'draft'
+      ? 'черновик'
+      : 'архив';
+  const statusColor =
+    quest.status === 'active'
+      ? 'bg-emerald-500/20 text-emerald-300'
+      : quest.status === 'draft'
+      ? 'bg-zinc-500/20 text-zinc-300'
+      : 'bg-amber-500/20 text-amber-300';
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-6 py-10">
@@ -70,14 +89,8 @@ export default async function EmployerQuestPage({
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <h1 className="text-2xl font-bold">{quest.title}</h1>
-                <span
-                  className={`text-xs px-2 py-0.5 rounded ${
-                    quest.status === 'active'
-                      ? 'bg-emerald-500/20 text-emerald-300'
-                      : 'bg-zinc-500/20 text-zinc-300'
-                  }`}
-                >
-                  {quest.status}
+                <span className={`text-xs px-2 py-0.5 rounded ${statusColor}`}>
+                  {statusLabel}
                 </span>
               </div>
               <p className="text-zinc-400 text-sm mb-3">{quest.description}</p>
@@ -92,7 +105,7 @@ export default async function EmployerQuestPage({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3 mt-5 pt-5 border-t border-zinc-800/60">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-5 pt-5 border-t border-zinc-800/60">
             <div className="text-center">
               <div className="text-xs text-zinc-500">Сдач</div>
               <div className="text-2xl font-semibold">{subs.length}</div>
@@ -104,22 +117,44 @@ export default async function EmployerQuestPage({
               </div>
             </div>
             <div className="text-center">
-              <div className="text-xs text-zinc-500">Героев</div>
-              <div className="text-2xl font-semibold">{uniqueHeroes}</div>
+              <div className="text-xs text-zinc-500">Шортлист</div>
+              <div className="text-2xl font-semibold text-blue-400">
+                {shortlisted}
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-xs text-zinc-500">Интервью</div>
+              <div className="text-2xl font-semibold text-amber-400">
+                {interviews}
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-xs text-zinc-500">Нанят</div>
+              <div className="text-2xl font-semibold text-emerald-400">
+                {hired}
+              </div>
             </div>
           </div>
 
-          <div className="flex gap-3 mt-5">
+          <div className="flex gap-3 mt-5 flex-wrap">
+            <Link
+              href={`/employer/quests/${quest.id}/edit`}
+              className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-amber-500/60"
+            >
+              Редактировать
+            </Link>
             <Link
               href={`/quests/${quest.slug}`}
               className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-amber-500/60"
             >
               Публичная страница
             </Link>
+            {quest.status === 'active' && (
+              <ArchiveQuestButton questId={quest.id} />
+            )}
           </div>
         </div>
 
-        {/* Фазы */}
         <h2 className="text-sm text-zinc-500 tracking-widest mt-8 mb-3">
           ФАЗЫ · {phases.length} · {quest.bossMaxHp} HP
         </h2>
@@ -144,7 +179,6 @@ export default async function EmployerQuestPage({
           ))}
         </div>
 
-        {/* Сдачи */}
         <h2 className="text-sm text-zinc-500 tracking-widest mt-8 mb-3">
           СДАЧИ · {subs.length}
         </h2>
@@ -155,62 +189,25 @@ export default async function EmployerQuestPage({
             страницу.
           </div>
         ) : (
-          <div className="space-y-2">
-            {subs.map((s) => {
-              const cls = HERO_CLASSES.find((c) => c.value === s.heroClass);
-              const victory = s.status === 'victory';
-              const pct = Math.round(
-                (s.damageDealt / (quest.bossMaxHp || 110)) * 100,
-              );
-
-              return (
-                <div
-                  key={s.id}
-                  className={`rounded-lg border p-4 ${
-                    victory
-                      ? 'border-emerald-800/40 bg-emerald-950/10'
-                      : 'border-red-900/40 bg-red-950/10'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-4 flex-wrap">
-                    <Link
-                      href={`/u/${s.heroNickname}`}
-                      className="flex items-center gap-3 hover:opacity-90"
-                    >
-                      <span className="text-2xl">{cls?.icon ?? '🧙'}</span>
-                      <div>
-                        <div className="font-medium">{s.heroNickname}</div>
-                        <div className="text-xs text-zinc-500">
-                          {cls?.label ?? s.heroClass} · ур. {s.heroLevel}
-                        </div>
-                      </div>
-                    </Link>
-
-                    <div
-                      className={`text-xs px-2 py-0.5 rounded ${
-                        victory
-                          ? 'bg-emerald-500/20 text-emerald-300'
-                          : 'bg-red-500/20 text-red-300'
-                      }`}
-                    >
-                      {victory ? 'победа' : 'поражение'} · {pct}%
-                    </div>
-                  </div>
-
-                  <a
-                    href={s.repoUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-zinc-500 font-mono truncate block mt-2 hover:text-amber-400"
-                  >
-                    {s.repoUrl}
-                  </a>
-                  <div className="text-xs text-zinc-600 mt-1">
-                    {new Date(s.createdAt).toLocaleString('ru-RU')}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="space-y-3">
+            {subs.map((s) => (
+              <EmployerSubmissionRow
+                key={s.id}
+                bossMaxHp={quest.bossMaxHp}
+                initialStatus={s.employerStatus}
+                initialNote={s.employerNote}
+                submission={{
+                  id: s.id,
+                  repoUrl: s.repoUrl,
+                  status: s.status,
+                  damageDealt: s.damageDealt,
+                  createdAt: s.createdAt.toISOString(),
+                  heroNickname: s.heroNickname,
+                  heroClass: s.heroClass,
+                  heroLevel: s.heroLevel,
+                }}
+              />
+            ))}
           </div>
         )}
       </div>
