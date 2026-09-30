@@ -26,6 +26,8 @@ export type PhaseResult = {
     staticIssues?: StaticIssue[];
     semgrepFindings?: SemgrepFinding[];
     metrics?: Record<string, number>;
+    containerLogs?: string[];
+    containerReason?: string;
   };
 };
 

@@ -12,11 +12,13 @@ import {
 import type {
   PhaseResult,
   VerifyReport,
-  StaticIssue,
   SemgrepFinding,
 } from './types';
 import { runStaticAnalysis, type StaticResult } from './analysis/static';
 import { runSemgrep } from './analysis/semgrep';
+import { runBuildCheck } from './docker/build-runner';
+import { runTestCheck } from './docker/test-runner';
+import { isDockerAvailable } from './docker/client';
 
 export type QuestPhase = {
   phaseOrder: number;
@@ -29,6 +31,7 @@ export type QuestPhase = {
 type Ctx = {
   owner: string;
   repo: string;
+  branch: string;
   repoMeta: Awaited<ReturnType<typeof getRepo>>;
   commits: Awaited<ReturnType<typeof getCommits>>;
   rootContents: Awaited<ReturnType<typeof getRootContents>>;
@@ -38,6 +41,7 @@ type Ctx = {
   staticResult?: StaticResult;
   semgrepFindings?: SemgrepFinding[];
   workflowTexts?: Record<string, string>;
+  dockerAvailable?: boolean;
 };
 
 type CheckResult = {
@@ -64,6 +68,12 @@ async function loadWorkflowTexts(ctx: Ctx): Promise<Record<string, string>> {
   );
   ctx.workflowTexts = Object.fromEntries(contents.entries());
   return ctx.workflowTexts;
+}
+
+async function dockerReady(ctx: Ctx): Promise<boolean> {
+  if (ctx.dockerAvailable !== undefined) return ctx.dockerAvailable;
+  ctx.dockerAvailable = await isDockerAvailable();
+  return ctx.dockerAvailable;
 }
 
 const CHECKS: Record<string, CheckFn> = {
@@ -120,10 +130,84 @@ const CHECKS: Record<string, CheckFn> = {
     return { passed: hasPkg && hasBuild, logs };
   },
 
+  build_real: async (ctx) => {
+    if (!(await dockerReady(ctx))) {
+      // Фоллбэк на эвристику
+      const fb = await CHECKS.build_config(ctx);
+      return {
+        passed: fb.passed,
+        logs: ['⚠ Docker недоступен — сборка проверена эвристикой', ...fb.logs],
+        details: { containerReason: 'docker-unavailable' },
+      };
+    }
+
+    const res = await runBuildCheck(ctx.owner, ctx.repo, ctx.branch);
+    return {
+      passed: res.ok,
+      logs: res.logs,
+      details: {
+        containerLogs: res.logs.slice(-60),
+        containerReason: res.reason,
+      },
+    };
+  },
+
+  tests: async ({ tree, packageJson }) => {
+    const logs: string[] = [];
+    const paths = tree.map((i) => i.path);
+    const testFiles = paths.filter((p) => /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(p));
+    logs.push(
+      testFiles.length > 0
+        ? `✔ Найдено тестовых файлов: ${testFiles.length}`
+        : '✘ Тестовые файлы не найдены',
+    );
+    const scripts = (packageJson?.scripts as Record<string, string>) ?? {};
+    const hasTestScript = !!scripts.test && !scripts.test.includes('no test specified');
+    logs.push(
+      hasTestScript ? `✔ Скрипт test: ${scripts.test}` : '✘ Скрипт test не настроен',
+    );
+    const devDeps = (packageJson?.devDependencies as Record<string, string>) ?? {};
+    const hasRunner = Object.keys(devDeps).some((d) =>
+      /jest|vitest|mocha|ava|node-tap/.test(d),
+    );
+    logs.push(
+      hasRunner
+        ? '✔ Тест-раннер обнаружен в devDependencies'
+        : '⚠ Тест-раннер не найден явно',
+    );
+    return { passed: testFiles.length > 0 && hasTestScript, logs };
+  },
+
+  tests_real: async (ctx) => {
+    if (!(await dockerReady(ctx))) {
+      const fb = await CHECKS.tests(ctx);
+      return {
+        passed: fb.passed,
+        logs: ['⚠ Docker недоступен — тесты проверены эвристикой', ...fb.logs],
+        details: { containerReason: 'docker-unavailable' },
+      };
+    }
+
+    const res = await runTestCheck(ctx.owner, ctx.repo, ctx.branch);
+    const metrics: Record<string, number> = {};
+    if (typeof res.passed === 'number') metrics.testsPassed = res.passed;
+    if (typeof res.failed === 'number') metrics.testsFailed = res.failed;
+    if (typeof res.total === 'number') metrics.testsTotal = res.total;
+
+    return {
+      passed: res.ok,
+      logs: res.logs,
+      details: {
+        containerLogs: res.logs.slice(-60),
+        containerReason: res.reason,
+        ...(Object.keys(metrics).length ? { metrics } : {}),
+      },
+    };
+  },
+
   static_analysis: async (ctx) => {
     const logs: string[] = [];
 
-    // ESLint (со своим батчем внутри)
     let staticRes: StaticResult;
     try {
       staticRes = await runStaticAnalysis(ctx.owner, ctx.repo, ctx.tree);
@@ -153,7 +237,6 @@ const CHECKS: Record<string, CheckFn> = {
     if (staticRes.metrics.todoCount > 0)
       logs.push(`  → TODO/FIXME: ${staticRes.metrics.todoCount}`);
 
-    // Semgrep — файлы берём из того же списка, что ESLint
     const semgrepTargets = ctx.tree
       .filter(
         (i) =>
@@ -215,32 +298,6 @@ const CHECKS: Record<string, CheckFn> = {
     };
   },
 
-  tests: async ({ tree, packageJson }) => {
-    const logs: string[] = [];
-    const paths = tree.map((i) => i.path);
-    const testFiles = paths.filter((p) => /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(p));
-    logs.push(
-      testFiles.length > 0
-        ? `✔ Найдено тестовых файлов: ${testFiles.length}`
-        : '✘ Тестовые файлы не найдены',
-    );
-    const scripts = (packageJson?.scripts as Record<string, string>) ?? {};
-    const hasTestScript = !!scripts.test && !scripts.test.includes('no test specified');
-    logs.push(
-      hasTestScript ? `✔ Скрипт test: ${scripts.test}` : '✘ Скрипт test не настроен',
-    );
-    const devDeps = (packageJson?.devDependencies as Record<string, string>) ?? {};
-    const hasRunner = Object.keys(devDeps).some((d) =>
-      /jest|vitest|mocha|ava|node-tap/.test(d),
-    );
-    logs.push(
-      hasRunner
-        ? '✔ Тест-раннер обнаружен в devDependencies'
-        : '⚠ Тест-раннер не найден явно',
-    );
-    return { passed: testFiles.length > 0 && hasTestScript, logs };
-  },
-
   deploy: async ({ readme, repoMeta }) => {
     const logs: string[] = [];
     const sources: string[] = [];
@@ -263,11 +320,9 @@ const CHECKS: Record<string, CheckFn> = {
       status: number | null;
       ms: number;
       note?: string;
-      aborted?: boolean;
     } | null = null;
 
     for (const url of urls.slice(0, 3)) {
-      // 1) HEAD с 6с
       const headStart = Date.now();
       try {
         const res = await fetch(url, {
@@ -282,7 +337,7 @@ const CHECKS: Record<string, CheckFn> = {
           ms: Date.now() - headStart,
           note:
             res.status === 401 || res.status === 403
-              ? 'доступ закрыт (Vercel Auth / приватный preview)'
+              ? 'доступ закрыт'
               : res.status === 404
               ? 'страница не найдена'
               : undefined,
@@ -291,11 +346,10 @@ const CHECKS: Record<string, CheckFn> = {
         break;
       } catch (e) {
         logs.push(
-          `  HEAD ${Date.now() - headStart}ms → ${(e as Error).name}: ${(e as Error).message}`,
+          `  HEAD ${Date.now() - headStart}ms → ${(e as Error).name}`,
         );
       }
 
-      // 2) GET с 8с
       const getStart = Date.now();
       try {
         const res = await fetch(url, {
@@ -313,7 +367,7 @@ const CHECKS: Record<string, CheckFn> = {
           ms: Date.now() - getStart,
           note:
             res.status === 401 || res.status === 403
-              ? 'доступ закрыт (Vercel Auth / приватный preview)'
+              ? 'доступ закрыт'
               : res.status === 404
               ? 'страница не найдена'
               : undefined,
@@ -321,10 +375,8 @@ const CHECKS: Record<string, CheckFn> = {
         logs.push(`  GET ${best.ms}ms → ${res.status}`);
         break;
       } catch (e) {
-        logs.push(
-          `  GET ${Date.now() - getStart}ms → ${(e as Error).name}`,
-        );
-        best = { url, status: null, ms: Date.now() - getStart, aborted: true };
+        logs.push(`  GET ${Date.now() - getStart}ms → ${(e as Error).name}`);
+        best = { url, status: null, ms: Date.now() - getStart };
       }
     }
 
@@ -335,10 +387,8 @@ const CHECKS: Record<string, CheckFn> = {
     logs.push(`→ Проверяем: ${best.url}`);
 
     if (best.status === null) {
-      logs.push(
-        '⚠ Не удалось установить соединение (сеть/таймаут). Не можем проверить деплой.',
-      );
-      logs.push('⚠ Засчитываем фазу: проблема на стороне проверяющего, а не игрока.');
+      logs.push('⚠ Не удалось установить соединение (сеть/таймаут).');
+      logs.push('⚠ Засчитываем: проблема на стороне проверяющего.');
       return { passed: true, logs };
     }
 
@@ -351,7 +401,7 @@ const CHECKS: Record<string, CheckFn> = {
     }
     if (authBlocked) {
       logs.push(`✔ Ответ ${best.status} — ${best.note}`);
-      logs.push('⚠ Засчитываем: приложение развёрнуто, но закрыто авторизацией.');
+      logs.push('⚠ Засчитываем: приложение развёрнуто.');
       return { passed: true, logs };
     }
     logs.push(`✘ Ответ ${best.status} — ${best.note ?? 'некорректный статус'}`);
@@ -429,8 +479,6 @@ const CHECKS: Record<string, CheckFn> = {
     const score = [hasSrc, hasLicense, hasTs].filter(Boolean).length;
     return { passed: score >= 2, logs };
   },
-
-  // ---------- CI/CD ----------
 
   ci_workflow: async (ctx) => {
     const logs: string[] = [];
@@ -579,6 +627,8 @@ export async function runVerification(
     };
   }
 
+  const branch = repoMeta.default_branch || 'main';
+
   const [commits, rootContents, readme, packageRaw, tree] = await Promise.all([
     getCommits(ref.owner, ref.repo).catch(() => []),
     getRootContents(ref.owner, ref.repo).catch(() => []),
@@ -599,6 +649,7 @@ export async function runVerification(
   const ctx: Ctx = {
     owner: ref.owner,
     repo: ref.repo,
+    branch,
     repoMeta,
     commits,
     rootContents,
@@ -613,24 +664,24 @@ export async function runVerification(
   for (const phase of sorted) {
     const check = CHECKS[phase.checkType];
     let result: CheckResult;
+
     if (!check) {
       result = {
         passed: false,
         logs: [`✘ Неизвестный тип проверки: ${phase.checkType}`],
       };
     } else {
-      try {
-        // Жёсткий таймаут на фазу, чтобы один краш не съел весь запрос
+            try {
         result = await Promise.race<CheckResult>([
           check(ctx),
-          new Promise<CheckResult>((resolve) =>
+                    new Promise<CheckResult>((resolve) =>
             setTimeout(
               () =>
                 resolve({
                   passed: false,
-                  logs: ['✘ Фаза превысила лимит времени (60с)'],
+                  logs: ['✘ Фаза превысила лимит времени (300с)'],
                 }),
-              60_000,
+              300_000,
             ),
           ),
         ]);
@@ -642,6 +693,7 @@ export async function runVerification(
         };
       }
     }
+
     const damage = result.passed ? phase.maxHp : 0;
     totalDamage += damage;
     results.push({

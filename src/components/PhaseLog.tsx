@@ -3,31 +3,17 @@
 import { useState } from 'react';
 import type { PhaseResult } from '@/lib/types';
 
-// Метрики, которые нужны только бэкенду для расчёта урона,
-// но не несут смысла для игрока
-const HIDDEN_METRIC_KEYS = new Set([
-  'deployDeclaredHp',
-  'deployReachable',
-]);
-
 export function PhaseLog({ phase, index }: { phase: PhaseResult; index: number }) {
   const [showIssues, setShowIssues] = useState(false);
   const [showSemgrep, setShowSemgrep] = useState(false);
   const [showMetrics, setShowMetrics] = useState(false);
+  const [showContainer, setShowContainer] = useState(false);
 
   const hasIssues = !!phase.details?.staticIssues?.length;
   const hasSemgrep = !!phase.details?.semgrepFindings?.length;
-
-  // Отфильтрованные метрики: убираем служебные ключи
-  const visibleMetrics = phase.details?.metrics
-    ? Object.fromEntries(
-        Object.entries(phase.details.metrics).filter(
-          ([k]) => !HIDDEN_METRIC_KEYS.has(k),
-        ),
-      )
-    : null;
-
-  const hasMetrics = !!visibleMetrics && Object.keys(visibleMetrics).length > 0;
+  const hasMetrics = !!phase.details?.metrics;
+  const hasContainer =
+    !!phase.details?.containerLogs && phase.details.containerLogs.length > 0;
 
   return (
     <div
@@ -38,7 +24,6 @@ export function PhaseLog({ phase, index }: { phase: PhaseResult; index: number }
       }`}
       style={{ animation: `fadeIn 0.4s ease ${index * 0.15}s both` }}
     >
-      {/* Заголовок фазы */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-3">
           <span
@@ -49,6 +34,11 @@ export function PhaseLog({ phase, index }: { phase: PhaseResult; index: number }
             {phase.passed ? '⚔️' : '💀'}
           </span>
           <span className="font-medium">{phase.name}</span>
+          {hasContainer && (
+            <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-700/40">
+              Docker
+            </span>
+          )}
         </div>
         <span
           className={`text-xs px-2 py-1 rounded ${
@@ -57,13 +47,12 @@ export function PhaseLog({ phase, index }: { phase: PhaseResult; index: number }
               : 'bg-red-500/20 text-red-300'
           }`}
         >
-          {phase.damage > 0 ? `-${phase.damage} HP` : 'промах'}
+          {phase.passed ? `-${phase.damage} HP` : 'промах'}
         </span>
       </div>
 
       <div className="text-xs text-zinc-500 mb-2">{phase.description}</div>
 
-      {/* Логи */}
       <ul className="text-xs space-y-1">
         {phase.logs.map((l, i) => (
           <li key={i} className="font-mono text-zinc-400 whitespace-pre-wrap">
@@ -72,7 +61,6 @@ export function PhaseLog({ phase, index }: { phase: PhaseResult; index: number }
         ))}
       </ul>
 
-      {/* Метрики (без служебных ключей) */}
       {hasMetrics && (
         <div className="mt-3">
           <button
@@ -83,7 +71,7 @@ export function PhaseLog({ phase, index }: { phase: PhaseResult; index: number }
           </button>
           {showMetrics && (
             <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-              {Object.entries(visibleMetrics!).map(([k, v]) => (
+              {Object.entries(phase.details!.metrics!).map(([k, v]) => (
                 <div
                   key={k}
                   className="rounded border border-zinc-800 bg-zinc-950/40 px-2 py-1"
@@ -97,7 +85,6 @@ export function PhaseLog({ phase, index }: { phase: PhaseResult; index: number }
         </div>
       )}
 
-      {/* ESLint / статические проблемы */}
       {hasIssues && (
         <div className="mt-3">
           <button
@@ -128,7 +115,6 @@ export function PhaseLog({ phase, index }: { phase: PhaseResult; index: number }
         </div>
       )}
 
-      {/* Semgrep */}
       {hasSemgrep && (
         <div className="mt-3">
           <button
@@ -153,6 +139,28 @@ export function PhaseLog({ phase, index }: { phase: PhaseResult; index: number }
                 </li>
               ))}
             </ul>
+          )}
+        </div>
+      )}
+
+      {hasContainer && (
+        <div className="mt-3">
+          <button
+            onClick={() => setShowContainer((v) => !v)}
+            className="text-xs text-blue-400/80 hover:text-blue-300"
+          >
+            {showContainer ? '▾' : '▸'} Логи контейнера (
+            {phase.details!.containerLogs!.length})
+            {phase.details?.containerReason && (
+              <span className="text-zinc-600 ml-1">
+                · {phase.details.containerReason}
+              </span>
+            )}
+          </button>
+          {showContainer && (
+            <pre className="mt-2 max-h-80 overflow-y-auto text-xs font-mono text-zinc-400 bg-black/40 rounded border border-zinc-800 p-3 whitespace-pre-wrap">
+              {phase.details!.containerLogs!.join('\n')}
+            </pre>
           )}
         </div>
       )}

@@ -10,7 +10,7 @@ import { withRetry } from '@/lib/db-retry';
 import type { VerifyResponse, VerifyReport } from '@/lib/types';
 
 export const runtime = 'nodejs';
-export const maxDuration = 120;
+export const maxDuration = 600;
 
 export async function POST(req: NextRequest) {
   try {
