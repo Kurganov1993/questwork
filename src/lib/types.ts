@@ -14,6 +14,15 @@ export type SemgrepFinding = {
   message: string;
 };
 
+export type AIReviewIssueItem = {
+  file: string;
+  line?: number;
+  severity: 'error' | 'warning' | 'info';
+  category: string;
+  message: string;
+  suggestion: string;
+};
+
 export type PhaseResult = {
   order: number;
   name: string;
@@ -28,6 +37,15 @@ export type PhaseResult = {
     metrics?: Record<string, number>;
     containerLogs?: string[];
     containerReason?: string;
+    aiReview?: {
+      score: number;
+      summary: string;
+      strengths: string[];
+      issues: AIReviewIssueItem[];
+      provider: string;
+      model: string;
+      durationMs: number;
+    };
   };
 };
 

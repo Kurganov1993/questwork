@@ -19,6 +19,8 @@ import { runSemgrep } from './analysis/semgrep';
 import { runBuildCheck } from './docker/build-runner';
 import { runTestCheck } from './docker/test-runner';
 import { isDockerAvailable } from './docker/client';
+import { runAIReview } from './ai/review';
+import { getProviderInfo } from './ai/client';
 
 export type QuestPhase = {
   phaseOrder: number;
@@ -52,6 +54,8 @@ type CheckResult = {
 
 type CheckFn = (ctx: Ctx) => Promise<CheckResult>;
 
+// ---------- Утилиты ----------
+
 async function loadWorkflowTexts(ctx: Ctx): Promise<Record<string, string>> {
   if (ctx.workflowTexts) return ctx.workflowTexts;
   const wfFiles = ctx.tree.filter(
@@ -75,6 +79,8 @@ async function dockerReady(ctx: Ctx): Promise<boolean> {
   ctx.dockerAvailable = await isDockerAvailable();
   return ctx.dockerAvailable;
 }
+
+// ---------- Реестр проверок ----------
 
 const CHECKS: Record<string, CheckFn> = {
   repo_exists: async ({ repoMeta }) => ({
@@ -132,7 +138,6 @@ const CHECKS: Record<string, CheckFn> = {
 
   build_real: async (ctx) => {
     if (!(await dockerReady(ctx))) {
-      // Фоллбэк на эвристику
       const fb = await CHECKS.build_config(ctx);
       return {
         passed: fb.passed,
@@ -146,7 +151,7 @@ const CHECKS: Record<string, CheckFn> = {
       passed: res.ok,
       logs: res.logs,
       details: {
-        containerLogs: res.logs.slice(-60),
+        containerLogs: res.logs.slice(-80),
         containerReason: res.reason,
       },
     };
@@ -155,14 +160,17 @@ const CHECKS: Record<string, CheckFn> = {
   tests: async ({ tree, packageJson }) => {
     const logs: string[] = [];
     const paths = tree.map((i) => i.path);
-    const testFiles = paths.filter((p) => /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(p));
+    const testFiles = paths.filter((p) =>
+      /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(p),
+    );
     logs.push(
       testFiles.length > 0
         ? `✔ Найдено тестовых файлов: ${testFiles.length}`
         : '✘ Тестовые файлы не найдены',
     );
     const scripts = (packageJson?.scripts as Record<string, string>) ?? {};
-    const hasTestScript = !!scripts.test && !scripts.test.includes('no test specified');
+    const hasTestScript =
+      !!scripts.test && !scripts.test.includes('no test specified');
     logs.push(
       hasTestScript ? `✔ Скрипт test: ${scripts.test}` : '✘ Скрипт test не настроен',
     );
@@ -198,7 +206,7 @@ const CHECKS: Record<string, CheckFn> = {
       passed: res.ok,
       logs: res.logs,
       details: {
-        containerLogs: res.logs.slice(-60),
+        containerLogs: res.logs.slice(-80),
         containerReason: res.reason,
         ...(Object.keys(metrics).length ? { metrics } : {}),
       },
@@ -345,9 +353,7 @@ const CHECKS: Record<string, CheckFn> = {
         logs.push(`  HEAD ${best.ms}ms → ${res.status}`);
         break;
       } catch (e) {
-        logs.push(
-          `  HEAD ${Date.now() - headStart}ms → ${(e as Error).name}`,
-        );
+        logs.push(`  HEAD ${Date.now() - headStart}ms → ${(e as Error).name}`);
       }
 
       const getStart = Date.now();
@@ -480,6 +486,109 @@ const CHECKS: Record<string, CheckFn> = {
     return { passed: score >= 2, logs };
   },
 
+  review_ai: async (ctx) => {
+    const info = getProviderInfo();
+
+    if (!info.ready) {
+      const fb = await CHECKS.review(ctx);
+      return {
+        passed: fb.passed,
+        logs: [
+          `⚠ AI-ревью недоступно (${info.reason ?? 'провайдер не настроен'})`,
+          '⚠ Сработала эвристика, как в фазе «Ревью наставника»',
+          ...fb.logs,
+        ],
+      };
+    }
+
+    const staticErrors = ctx.staticResult?.score.errors ?? 0;
+    const staticWarnings = ctx.staticResult?.score.warnings ?? 0;
+
+    const res = await runAIReview(
+      ctx.owner,
+      ctx.repo,
+      ctx.tree,
+      ctx.readme,
+      ctx.packageJson,
+      staticErrors + staticWarnings,
+    );
+
+    if (!res.ok) {
+      const fb = await CHECKS.review(ctx);
+      return {
+        passed: fb.passed,
+        logs: [
+          `⚠ AI-ревью упало: ${res.reason ?? 'неизвестная ошибка'}`,
+          '⚠ Сработала эвристика',
+          ...fb.logs,
+        ],
+      };
+    }
+
+    const logs: string[] = [];
+    logs.push(`✔ Провайдер: ${res.provider} / ${res.model}`);
+    logs.push(`✔ Время ответа: ${(res.durationMs / 1000).toFixed(1)}с`);
+    logs.push(`✔ Оценка кода: ${res.score}/100`);
+    logs.push(`✔ Найдено замечаний: ${res.issues.length}`);
+
+    const bySeverity = {
+      error: res.issues.filter((i) => i.severity === 'error').length,
+      warning: res.issues.filter((i) => i.severity === 'warning').length,
+      info: res.issues.filter((i) => i.severity === 'info').length,
+    };
+    logs.push(
+      `  errors: ${bySeverity.error}, warnings: ${bySeverity.warning}, info: ${bySeverity.info}`,
+    );
+
+    if (res.summary) {
+      logs.push('');
+      logs.push(`📝 ${res.summary}`);
+    }
+
+    if (res.strengths.length > 0) {
+      logs.push('');
+      logs.push('Сильные стороны:');
+      for (const s of res.strengths.slice(0, 4)) {
+        logs.push(`  + ${s}`);
+      }
+    }
+
+    if (res.issues.length > 0) {
+      logs.push('');
+      logs.push('Ключевые замечания:');
+      for (const i of res.issues.slice(0, 3)) {
+        const loc = i.line ? `${i.file}:${i.line}` : i.file;
+        logs.push(`  [${i.severity}] ${loc} — ${i.message}`);
+      }
+    }
+
+    // Порог: пропускаем, если score >= 60 и нет issues уровня "error"
+    const passed = res.score >= 60 && bySeverity.error === 0;
+
+    return {
+      passed,
+      logs,
+      details: {
+        aiReview: {
+          score: res.score,
+          summary: res.summary,
+          strengths: res.strengths,
+          issues: res.issues,
+          provider: res.provider,
+          model: res.model,
+          durationMs: res.durationMs,
+        },
+        metrics: {
+          aiScore: res.score,
+          aiIssuesTotal: res.issues.length,
+          aiIssuesErrors: bySeverity.error,
+          aiIssuesWarnings: bySeverity.warning,
+          aiDurationMs: res.durationMs,
+        },
+      },
+    };
+  },
+
   ci_workflow: async (ctx) => {
     const logs: string[] = [];
     const wfFiles = ctx.tree.filter(
@@ -562,6 +671,8 @@ const CHECKS: Record<string, CheckFn> = {
     return { passed: hasDeploy, logs };
   },
 };
+
+// ---------- Точка входа ----------
 
 export async function runVerification(
   repoUrl: string,
@@ -671,17 +782,17 @@ export async function runVerification(
         logs: [`✘ Неизвестный тип проверки: ${phase.checkType}`],
       };
     } else {
-            try {
+      try {
         result = await Promise.race<CheckResult>([
           check(ctx),
-                    new Promise<CheckResult>((resolve) =>
+          new Promise<CheckResult>((resolve) =>
             setTimeout(
               () =>
                 resolve({
                   passed: false,
-                  logs: ['✘ Фаза превысила лимит времени (300с)'],
+                  logs: ['✘ Фаза превысила лимит времени (600с)'],
                 }),
-              300_000,
+              600_000,
             ),
           ),
         ]);
