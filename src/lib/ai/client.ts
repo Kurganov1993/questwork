@@ -68,7 +68,6 @@ export async function chat(opts: ChatOpts): Promise<ChatResult> {
   const info = getProviderInfo();
   if (!info.ready) throw new Error(info.reason ?? 'AI провайдер не готов');
 
-  // Дефолт — 300 секунд, потому что локальные модели медленные
   const timeoutMs = opts.timeoutMs ?? 300_000;
   const t0 = Date.now();
 
@@ -85,13 +84,30 @@ export async function chat(opts: ChatOpts): Promise<ChatResult> {
   throw new Error(`Провайдер ${info.provider} не поддерживается`);
 }
 
+/**
+ * Универсальный клиент для любого OpenAI-совместимого API:
+ *   - OpenAI:      https://api.openai.com/v1
+ *   - ZvenoAI:     https://api.zveno.ai/v1
+ *   - Polza.ai:    https://polza.ai/api/v1
+ *   - OpenRouter:  https://openrouter.ai/api/v1
+ *   - Groq:        https://api.groq.com/openai/v1
+ *   - Локальный прокси — любой адрес
+ *
+ * Адрес берётся из AI_BASE_URL, ключ — из AI_API_KEY.
+ */
 async function chatOpenAI(
   opts: ChatOpts,
   info: ProviderInfo,
   timeoutMs: number,
   t0: number,
 ): Promise<ChatResult> {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const baseUrl = (
+    process.env.AI_BASE_URL ?? 'https://api.openai.com/v1'
+  ).replace(/\/+$/, '');
+
+  const url = `${baseUrl}/chat/completions`;
+
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -109,7 +125,7 @@ async function chatOpenAI(
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`OpenAI ${res.status}: ${body.slice(0, 300)}`);
+    throw new Error(`${url} → HTTP ${res.status}: ${body.slice(0, 300)}`);
   }
 
   const data = (await res.json()) as {
@@ -120,7 +136,7 @@ async function chatOpenAI(
   const text = data.choices?.[0]?.message?.content ?? '';
   return {
     text,
-    provider: 'openai',
+    provider: info.provider,
     model: info.model,
     durationMs: Date.now() - t0,
     tokensIn: data.usage?.prompt_tokens,
@@ -134,10 +150,14 @@ async function chatAnthropic(
   timeoutMs: number,
   t0: number,
 ): Promise<ChatResult> {
+  const baseUrl = (
+    process.env.AI_BASE_URL ?? 'https://api.anthropic.com/v1'
+  ).replace(/\/+$/, '');
+
   const systemMsg = opts.messages.find((m) => m.role === 'system')?.content;
   const userMsgs = opts.messages.filter((m) => m.role !== 'system');
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch(`${baseUrl}/messages`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -156,7 +176,7 @@ async function chatAnthropic(
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`Anthropic ${res.status}: ${body.slice(0, 300)}`);
+    throw new Error(`${baseUrl} → HTTP ${res.status}: ${body.slice(0, 300)}`);
   }
 
   const data = (await res.json()) as {
@@ -167,7 +187,7 @@ async function chatAnthropic(
   const text = data.content?.map((c) => c.text ?? '').join('') ?? '';
   return {
     text,
-    provider: 'anthropic',
+    provider: info.provider,
     model: info.model,
     durationMs: Date.now() - t0,
     tokensIn: data.usage?.input_tokens,
@@ -183,16 +203,10 @@ async function chatOllama(
 ): Promise<ChatResult> {
   const baseUrl = process.env.AI_BASE_URL ?? 'http://localhost:11434';
 
-  // Ключевые параметры производительности Ollama:
-  //   num_ctx     — размер окна контекста. У qwen по умолчанию 32768,
-  //                 из-за чего модель выделяет огромный KV-кэш.
-  //                 4096 → в 8 раз меньше памяти, в 2-3 раза быстрее.
-  //   num_predict — максимум выходных токенов.
-  //   keep_alive  — сколько держать модель в RAM после ответа.
   const numCtx = Number(process.env.AI_NUM_CTX ?? 4096);
   const keepAlive = process.env.AI_KEEP_ALIVE ?? '30m';
 
-  const res = await fetch(`${baseUrl}/api/chat`, {
+  const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -214,7 +228,7 @@ async function chatOllama(
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`Ollama ${res.status}: ${body.slice(0, 300)}`);
+    throw new Error(`${baseUrl} → HTTP ${res.status}: ${body.slice(0, 300)}`);
   }
 
   const data = (await res.json()) as {
@@ -226,7 +240,7 @@ async function chatOllama(
   const text = data.message?.content ?? '';
   return {
     text,
-    provider: 'ollama',
+    provider: info.provider,
     model: info.model,
     durationMs: Date.now() - t0,
     tokensIn: data.prompt_eval_count,

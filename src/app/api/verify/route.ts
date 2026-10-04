@@ -7,6 +7,7 @@ import { getCurrentHero } from '@/lib/auth';
 import { awardQuestArtifacts } from '@/lib/loot';
 import { checkAndAwardAchievements } from '@/lib/achievements';
 import { withRetry } from '@/lib/db-retry';
+import { slimReport } from '@/lib/verify-report';
 import type { VerifyResponse, VerifyReport } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -83,6 +84,10 @@ export async function POST(req: NextRequest) {
       victory: report.victory,
     });
 
+    // ============================================================
+    // СДАЧА — сохраняем в БД, но не полный отчёт, а обрезанный.
+    // Полный уйдёт клиенту, обрезанный — в Neon.
+    // ============================================================
     const [submission] = await withRetry(
       () =>
         db
@@ -93,7 +98,7 @@ export async function POST(req: NextRequest) {
             repoUrl,
             status: report.victory ? 'victory' : 'defeat',
             damageDealt: report.totalDamage,
-            report,
+            report: slimReport(report),
           })
           .returning(),
       { label: 'verify:insert-submission' },
