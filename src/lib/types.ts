@@ -23,6 +23,25 @@ export type AIReviewIssueItem = {
   suggestion: string;
 };
 
+export type AIReviewDetails = {
+  score: number;
+  summary: string;
+  strengths: string[];
+  issues: AIReviewIssueItem[];
+  provider: string;
+  model: string;
+  durationMs: number;
+};
+
+export type PhaseDetails = {
+  staticIssues?: StaticIssue[];
+  semgrepFindings?: SemgrepFinding[];
+  metrics?: Record<string, number>;
+  containerLogs?: string[];
+  containerReason?: string;
+  aiReview?: AIReviewDetails;
+};
+
 export type PhaseResult = {
   order: number;
   name: string;
@@ -31,22 +50,7 @@ export type PhaseResult = {
   damage: number;
   passed: boolean;
   logs: string[];
-  details?: {
-    staticIssues?: StaticIssue[];
-    semgrepFindings?: SemgrepFinding[];
-    metrics?: Record<string, number>;
-    containerLogs?: string[];
-    containerReason?: string;
-    aiReview?: {
-      score: number;
-      summary: string;
-      strengths: string[];
-      issues: AIReviewIssueItem[];
-      provider: string;
-      model: string;
-      durationMs: number;
-    };
-  };
+  details?: PhaseDetails;
 };
 
 export type LootItem = {

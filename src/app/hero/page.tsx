@@ -17,6 +17,7 @@ import { LootCard } from '@/components/LootCard';
 import { AchievementCard } from '@/components/AchievementCard';
 import { awardQuestArtifacts } from '@/lib/loot';
 import { withRetry } from '@/lib/db-retry';
+import { HeroBackground } from '@/components/home/HeroBackground';
 import type { LootItem, EarnedAchievementItem } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -56,8 +57,7 @@ export default async function HeroPage() {
   const hero = await getCurrentHero();
   if (!hero) redirect('/login');
 
-  // Досылаем лут за прошлые победы, если БД упала в момент награды.
-  // awardQuestArtifacts идемпотентен — повторные вызовы безопасны.
+  // Досылаем лут за прошлые победы — идемпотентно
   try {
     const victorySubs = await withRetry(
       () =>
@@ -96,6 +96,8 @@ export default async function HeroPage() {
           employerNote: submissions.employerNote,
           questTitle: quests.title,
           questSlug: quests.slug,
+          questIcon: quests.icon,
+          bossName: quests.bossName,
           bossMaxHp: quests.bossMaxHp,
         })
         .from(submissions)
@@ -149,86 +151,145 @@ export default async function HeroPage() {
   );
 
   const victories = mySubs.filter((s) => s.status === 'victory').length;
+  const defeats = mySubs.filter((s) => s.status === 'defeat').length;
+  const totalAttempts = mySubs.length;
+  const winRate =
+    totalAttempts > 0 ? Math.round((victories / totalAttempts) * 100) : 0;
+
   const invitations = mySubs.filter(
     (s) => s.employerStatus === 'interview' || s.employerStatus === 'hired',
   ).length;
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-6 py-10">
-      <div className="max-w-3xl mx-auto">
-        <Link href="/" className="text-sm text-zinc-500 hover:text-amber-400">
-          ← На главную
-        </Link>
+    <main className="min-h-screen bg-zinc-950 text-zinc-100">
+      {/* ==================== HERO ==================== */}
+      <section className="relative overflow-hidden">
+        <HeroBackground />
 
-        {/* Карточка героя */}
-        <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-6">
-          <div className="flex items-start gap-5">
-            <div className="text-6xl">{cls?.icon ?? '🧙'}</div>
-            <div className="flex-1">
-              <div className="text-sm text-zinc-500">
-                {cls?.label ?? hero.heroClass}
+        <div className="relative max-w-4xl mx-auto px-6 pt-16 pb-10">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-amber-400 transition"
+          >
+            ← На главную
+          </Link>
+
+          {/* Карточка героя */}
+          <div className="mt-6 glass rounded-3xl p-7 relative overflow-hidden">
+            <div className="absolute -top-32 -right-32 w-80 h-80 rounded-full bg-amber-500/15 blur-[100px]" />
+
+            <div className="relative flex flex-col sm:flex-row items-start gap-6">
+              {/* Аватар класса */}
+              <div className="shrink-0 relative">
+                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-amber-500/30 to-amber-500/5 border border-amber-500/40 grid place-items-center text-5xl drop-shadow-[0_0_25px_rgba(251,191,36,0.4)]">
+                  {cls?.icon ?? '🧙'}
+                </div>
               </div>
-              <h1 className="text-3xl font-bold">{hero.nickname}</h1>
-              <div className="flex flex-wrap gap-6 mt-3 text-sm">
-                <div>
-                  <div className="text-zinc-500">Уровень</div>
-                  <div className="text-2xl font-semibold text-amber-400">
-                    {hero.level}
-                  </div>
+
+              <div className="flex-1 min-w-0">
+                <div className="text-xs text-zinc-500 font-mono tracking-widest mb-1">
+                  {cls?.label ?? hero.heroClass}
                 </div>
-                <div>
-                  <div className="text-zinc-500">XP</div>
-                  <div className="text-2xl font-semibold">{hero.xp}</div>
+                <h1 className="text-3xl sm:text-4xl font-bold mb-4">
+                  {hero.nickname}
+                </h1>
+
+                {/* Основные статы */}
+                <div className="flex flex-wrap gap-x-6 gap-y-3">
+                  <StatCell
+                    label="Уровень"
+                    value={String(hero.level)}
+                    icon="🧙"
+                    accent
+                  />
+                  <StatCell
+                    label="XP"
+                    value={hero.xp.toLocaleString('ru-RU')}
+                    icon="✨"
+                  />
+                  <StatCell
+                    label="Золото"
+                    value={String(hero.gold)}
+                    icon="🪙"
+                  />
+                  <StatCell
+                    label="Победы"
+                    value={String(victories)}
+                    icon="⚔️"
+                    accent
+                  />
+                  {invitations > 0 && (
+                    <StatCell
+                      label="Приглашения"
+                      value={String(invitations)}
+                      icon="🔔"
+                      accent
+                    />
+                  )}
                 </div>
-                <div>
-                  <div className="text-zinc-500">Золото</div>
-                  <div className="text-2xl font-semibold">🪙 {hero.gold}</div>
-                </div>
-                <div>
-                  <div className="text-zinc-500">Победы</div>
-                  <div className="text-2xl font-semibold text-emerald-400">
-                    {victories}
-                  </div>
-                </div>
-                {invitations > 0 && (
-                  <div>
-                    <div className="text-zinc-500">Приглашения</div>
-                    <div className="text-2xl font-semibold text-amber-400">
-                      {invitations}
-                    </div>
-                  </div>
-                )}
               </div>
-            </div>
-                        <div className="flex flex-col items-end gap-2">
-              <Link
-                href="/hero/invitations"
-                className="text-xs text-zinc-500 hover:text-amber-400 transition"
-              >
-                Приглашения от компаний →
-              </Link>
-              <Link
-                href={`/u/${hero.nickname}`}
-                className="text-xs text-zinc-500 hover:text-amber-400 transition"
-              >
-                Публичный профиль →
-              </Link>
-              <LogoutButton />
+
+              {/* Ссылки справа */}
+              <div className="flex flex-col items-start sm:items-end gap-2 shrink-0">
+                <Link
+                  href="/hero/invitations"
+                  className="text-xs text-zinc-500 hover:text-amber-400 transition"
+                >
+                  Приглашения от компаний →
+                </Link>
+                <Link
+                  href={`/u/${hero.nickname}`}
+                  className="text-xs text-zinc-500 hover:text-amber-400 transition"
+                >
+                  Публичный профиль →
+                </Link>
+                <LogoutButton />
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Артефакты */}
-        <h2 className="text-sm text-zinc-500 tracking-widest mt-8 mb-3">
-          АРТЕФАКТЫ · {myArtifacts.length}
-        </h2>
+          {/* Сводная статистика */}
+          {totalAttempts > 0 && (
+            <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <SummaryStat
+                label="Попыток"
+                value={String(totalAttempts)}
+                icon="🎯"
+              />
+              <SummaryStat
+                label="Побед"
+                value={String(victories)}
+                icon="🏆"
+                accent
+              />
+              <SummaryStat
+                label="Win rate"
+                value={`${winRate}%`}
+                icon="📊"
+              />
+              <SummaryStat
+                label="Поражений"
+                value={String(defeats)}
+                icon="💀"
+              />
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ==================== АРТЕФАКТЫ ==================== */}
+      <section className="relative max-w-4xl mx-auto px-6 pb-10">
+        <SectionLabel>АРТЕФАКТЫ · {myArtifacts.length}</SectionLabel>
 
         {myArtifacts.length === 0 ? (
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 text-zinc-500 text-sm">
-            Пока пусто. Победи босса — получишь свой первый артефакт.
-          </div>
+          <EmptyBlock
+            icon="💎"
+            title="Пока пусто"
+            text="Победи босса — получишь свой первый артефакт."
+            cta={{ href: '/quests', label: 'К доске квестов' }}
+          />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" data-cascade>
             {myArtifacts.map((a) => {
               const item: LootItem = {
                 id: a.id,
@@ -239,22 +300,28 @@ export default async function HeroPage() {
                 rarity: a.rarity as LootItem['rarity'],
                 isNew: false,
               };
-              return <LootCard key={a.id} item={item} compact />;
+              return (
+                <div key={a.id} data-cascade-item>
+                  <LootCard item={item} compact />
+                </div>
+              );
             })}
           </div>
         )}
+      </section>
 
-        {/* Достижения */}
-        <h2 className="text-sm text-zinc-500 tracking-widest mt-8 mb-3">
-          ДОСТИЖЕНИЯ · {myAchievements.length}
-        </h2>
+      {/* ==================== ДОСТИЖЕНИЯ ==================== */}
+      <section className="relative max-w-4xl mx-auto px-6 pb-10">
+        <SectionLabel>ДОСТИЖЕНИЯ · {myAchievements.length}</SectionLabel>
 
         {myAchievements.length === 0 ? (
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 text-zinc-500 text-sm">
-            Пока нет достижений. Победи босса — и откроются первые бейджи.
-          </div>
+          <EmptyBlock
+            icon="🏆"
+            title="Пока нет достижений"
+            text="Победи босса — и откроются первые бейджи."
+          />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" data-cascade>
             {myAchievements.map((a) => {
               const item: EarnedAchievementItem = {
                 id: a.id,
@@ -265,28 +332,29 @@ export default async function HeroPage() {
                 xpReward: a.xpReward,
                 goldReward: a.goldReward,
               };
-              return <AchievementCard key={a.id} item={item} compact />;
+              return (
+                <div key={a.id} data-cascade-item>
+                  <AchievementCard item={item} compact />
+                </div>
+              );
             })}
           </div>
         )}
+      </section>
 
-        {/* История походов */}
-        <h2 className="text-sm text-zinc-500 tracking-widest mt-8 mb-3">
-          ИСТОРИЯ ПОХОДОВ
-        </h2>
+      {/* ==================== ИСТОРИЯ ПОХОДОВ ==================== */}
+      <section className="relative max-w-4xl mx-auto px-6 pb-20">
+        <SectionLabel>ИСТОРИЯ ПОХОДОВ · {totalAttempts}</SectionLabel>
 
         {mySubs.length === 0 ? (
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-6 text-zinc-500 text-sm">
-            Ты ещё не сдавал квесты. Пора начинать.{' '}
-            <Link
-              href="/quests"
-              className="text-amber-400 hover:text-amber-300"
-            >
-              К доске квестов →
-            </Link>
-          </div>
+          <EmptyBlock
+            icon="📜"
+            title="Ты ещё не сдавал квесты"
+            text="Пора начинать. Возьми первый квест и сдай GitHub-репозиторий."
+            cta={{ href: '/quests', label: 'К доске квестов' }}
+          />
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3" data-cascade>
             {mySubs.map((s) => {
               const pct = Math.round(
                 (s.damageDealt / (s.bossMaxHp || 110)) * 100,
@@ -297,47 +365,94 @@ export default async function HeroPage() {
               return (
                 <div
                   key={s.id}
-                  className={`rounded-lg border p-4 ${
+                  data-cascade-item
+                  className={`glass rounded-2xl p-5 relative overflow-hidden ${
                     victory
-                      ? 'border-emerald-800/40 bg-emerald-950/10'
-                      : 'border-red-900/40 bg-red-950/10'
+                      ? 'border-l-2 border-l-emerald-500/60'
+                      : 'border-l-2 border-l-red-500/60'
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-                    <Link
-                      href={s.questSlug ? `/quests/${s.questSlug}` : '#'}
-                      className="font-medium hover:text-amber-400"
-                    >
-                      {s.questTitle ?? 'Квест'}
-                    </Link>
-                    <div
-                      className={`text-xs px-2 py-0.5 rounded ${
-                        victory
-                          ? 'bg-emerald-500/20 text-emerald-300'
-                          : 'bg-red-500/20 text-red-300'
-                      }`}
-                    >
-                      {victory ? 'победа' : 'поражение'} · {pct}%
+                  <div className="flex items-start gap-4 flex-wrap">
+                    {/* Иконка квеста */}
+                    <div className="text-3xl shrink-0">
+                      {s.questIcon ?? (victory ? '⚔️' : '💀')}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      {/* Заголовок + статус победы */}
+                      <div className="flex items-center gap-3 mb-1 flex-wrap">
+                        <Link
+                          href={s.questSlug ? `/quests/${s.questSlug}` : '#'}
+                          className="font-semibold hover:text-amber-400 transition"
+                        >
+                          {s.questTitle ?? 'Квест'}
+                        </Link>
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded-full border ${
+                            victory
+                              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-700/40'
+                              : 'bg-red-500/15 text-red-300 border-red-700/40'
+                          }`}
+                        >
+                          {victory ? '✓ победа' : '✗ поражение'}
+                        </span>
+                        <span className="text-xs text-zinc-500 font-mono">
+                          {pct}% урона
+                        </span>
+                      </div>
+
+                      {/* Босс */}
+                      {s.bossName && (
+                        <div className="text-xs text-zinc-500 mb-2">
+                          👑 {s.bossName}
+                        </div>
+                      )}
+
+                      {/* Репозиторий */}
+                      <a
+                        href={s.repoUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-zinc-500 font-mono truncate block hover:text-amber-400 transition"
+                      >
+                        {s.repoUrl}
+                      </a>
+
+                      <div className="text-xs text-zinc-600 mt-1">
+                        {new Date(s.createdAt).toLocaleString('ru-RU')}
+                      </div>
+                    </div>
+
+                    {/* Прогресс-полоса урона справа */}
+                    <div className="shrink-0 w-24 sm:w-32">
+                      <div className="text-xs text-zinc-500 mb-1 text-right">
+                        {s.damageDealt} / {s.bossMaxHp}
+                      </div>
+                      <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            victory
+                              ? 'bg-gradient-to-r from-emerald-500/60 to-emerald-400'
+                              : 'bg-gradient-to-r from-red-500/60 to-red-400'
+                          }`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
                     </div>
                   </div>
-                  <div className="text-xs text-zinc-500 font-mono truncate">
-                    {s.repoUrl}
-                  </div>
-                  <div className="text-xs text-zinc-600 mt-1">
-                    {new Date(s.createdAt).toLocaleString('ru-RU')}
-                  </div>
 
+                  {/* Статус работодателя */}
                   {s.employerStatus && (
-                    <div className="mt-2 pt-2 border-t border-zinc-800/60">
+                    <div className="mt-3 pt-3 border-t border-white/5">
                       <span
-                        className={`inline-block text-xs px-2 py-0.5 rounded border ${employerStatusStyle(
+                        className={`inline-block text-xs px-2 py-0.5 rounded-full border ${employerStatusStyle(
                           s.employerStatus,
                         )}`}
                       >
                         Работодатель: {statusLabel}
                       </span>
                       {s.employerNote && (
-                        <div className="text-xs text-zinc-500 mt-1 italic">
+                        <div className="text-xs text-zinc-500 mt-1.5 italic border-l-2 border-zinc-700/60 pl-3">
                           «{s.employerNote}»
                         </div>
                       )}
@@ -348,7 +463,102 @@ export default async function HeroPage() {
             })}
           </div>
         )}
-      </div>
+      </section>
     </main>
+  );
+}
+
+// ==================== ХЕЛПЕРЫ ====================
+
+function StatCell({
+  label,
+  value,
+  icon,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  icon: string;
+  accent?: boolean;
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-0.5">
+        <span className="opacity-70">{icon}</span>
+        <span className="tracking-wide uppercase">{label}</span>
+      </div>
+      <div
+        className={`text-2xl font-bold ${
+          accent ? 'text-gradient-amber' : 'text-zinc-100'
+        }`}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function SummaryStat({
+  label,
+  value,
+  icon,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  icon: string;
+  accent?: boolean;
+}) {
+  return (
+    <div className="glass rounded-xl px-4 py-3">
+      <div className="flex items-center gap-2 text-xs text-zinc-500 mb-1">
+        <span>{icon}</span>
+        <span className="tracking-wide uppercase">{label}</span>
+      </div>
+      <div
+        className={`text-2xl font-bold ${
+          accent ? 'text-gradient-amber' : 'text-zinc-100'
+        }`}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="text-sm font-mono tracking-[0.2em] text-zinc-500 flex items-center gap-3 mb-4">
+      <span className="h-px w-6 bg-gradient-to-r from-transparent to-amber-500/60" />
+      {children}
+    </h2>
+  );
+}
+
+function EmptyBlock({
+  icon,
+  title,
+  text,
+  cta,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+  cta?: { href: string; label: string };
+}) {
+  return (
+    <div className="glass rounded-2xl p-8 text-center">
+      <div className="text-4xl mb-3">{icon}</div>
+      <div className="font-semibold mb-1">{title}</div>
+      <div className="text-sm text-zinc-500 mb-4 max-w-md mx-auto">{text}</div>
+      {cta && (
+        <Link
+          href={cta.href}
+          className="inline-block px-5 py-2.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition text-sm font-medium"
+        >
+          {cta.label}
+        </Link>
+      )}
+    </div>
   );
 }

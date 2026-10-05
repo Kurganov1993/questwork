@@ -9,11 +9,7 @@ import {
   getFilesBatch,
   GitHubError,
 } from './github';
-import type {
-  PhaseResult,
-  VerifyReport,
-  SemgrepFinding,
-} from './types';
+import type { PhaseResult, VerifyReport, SemgrepFinding } from './types';
 import { runStaticAnalysis, type StaticResult } from './analysis/static';
 import { runSemgrep } from './analysis/semgrep';
 import { runBuildCheck } from './docker/build-runner';
@@ -29,6 +25,12 @@ export type QuestPhase = {
   checkType: string;
   maxHp: number;
 };
+
+export type OnPhaseCallback = (
+  phase: PhaseResult,
+  index: number,
+  total: number,
+) => void;
 
 type Ctx = {
   owner: string;
@@ -54,8 +56,6 @@ type CheckResult = {
 
 type CheckFn = (ctx: Ctx) => Promise<CheckResult>;
 
-// ---------- Утилиты ----------
-
 async function loadWorkflowTexts(ctx: Ctx): Promise<Record<string, string>> {
   if (ctx.workflowTexts) return ctx.workflowTexts;
   const wfFiles = ctx.tree.filter(
@@ -79,8 +79,6 @@ async function dockerReady(ctx: Ctx): Promise<boolean> {
   ctx.dockerAvailable = await isDockerAvailable();
   return ctx.dockerAvailable;
 }
-
-// ---------- Реестр проверок ----------
 
 const CHECKS: Record<string, CheckFn> = {
   repo_exists: async ({ repoMeta }) => ({
@@ -145,13 +143,12 @@ const CHECKS: Record<string, CheckFn> = {
         details: { containerReason: 'docker-unavailable' },
       };
     }
-
     const res = await runBuildCheck(ctx.owner, ctx.repo, ctx.branch);
     return {
       passed: res.ok,
       logs: res.logs,
       details: {
-        containerLogs: res.logs.slice(-80),
+        containerLogs: res.logs.slice(-60),
         containerReason: res.reason,
       },
     };
@@ -160,17 +157,14 @@ const CHECKS: Record<string, CheckFn> = {
   tests: async ({ tree, packageJson }) => {
     const logs: string[] = [];
     const paths = tree.map((i) => i.path);
-    const testFiles = paths.filter((p) =>
-      /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(p),
-    );
+    const testFiles = paths.filter((p) => /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(p));
     logs.push(
       testFiles.length > 0
         ? `✔ Найдено тестовых файлов: ${testFiles.length}`
         : '✘ Тестовые файлы не найдены',
     );
     const scripts = (packageJson?.scripts as Record<string, string>) ?? {};
-    const hasTestScript =
-      !!scripts.test && !scripts.test.includes('no test specified');
+    const hasTestScript = !!scripts.test && !scripts.test.includes('no test specified');
     logs.push(
       hasTestScript ? `✔ Скрипт test: ${scripts.test}` : '✘ Скрипт test не настроен',
     );
@@ -195,18 +189,16 @@ const CHECKS: Record<string, CheckFn> = {
         details: { containerReason: 'docker-unavailable' },
       };
     }
-
     const res = await runTestCheck(ctx.owner, ctx.repo, ctx.branch);
     const metrics: Record<string, number> = {};
     if (typeof res.passed === 'number') metrics.testsPassed = res.passed;
     if (typeof res.failed === 'number') metrics.testsFailed = res.failed;
     if (typeof res.total === 'number') metrics.testsTotal = res.total;
-
     return {
       passed: res.ok,
       logs: res.logs,
       details: {
-        containerLogs: res.logs.slice(-80),
+        containerLogs: res.logs.slice(-60),
         containerReason: res.reason,
         ...(Object.keys(metrics).length ? { metrics } : {}),
       },
@@ -562,7 +554,6 @@ const CHECKS: Record<string, CheckFn> = {
       }
     }
 
-    // Порог: пропускаем, если score >= 60 и нет issues уровня "error"
     const passed = res.score >= 60 && bySeverity.error === 0;
 
     return {
@@ -672,12 +663,11 @@ const CHECKS: Record<string, CheckFn> = {
   },
 };
 
-// ---------- Точка входа ----------
-
 export async function runVerification(
   repoUrl: string,
   phases: QuestPhase[],
   victoryThreshold: number,
+  onPhase?: OnPhaseCallback,
 ): Promise<VerifyReport> {
   const sorted = [...phases].sort((a, b) => a.phaseOrder - b.phaseOrder);
   const bossMaxHpTotal = sorted.reduce((s, p) => s + p.maxHp, 0) || 100;
@@ -807,7 +797,8 @@ export async function runVerification(
 
     const damage = result.passed ? phase.maxHp : 0;
     totalDamage += damage;
-    results.push({
+
+    const phaseResult: PhaseResult = {
       order: phase.phaseOrder,
       name: phase.name,
       description: phase.description,
@@ -816,7 +807,17 @@ export async function runVerification(
       passed: result.passed,
       logs: result.logs,
       details: result.details,
-    });
+    };
+
+    results.push(phaseResult);
+
+    if (onPhase) {
+      try {
+        onPhase(phaseResult, results.length - 1, sorted.length);
+      } catch (e) {
+        console.error('[verifier] onPhase callback failed:', e);
+      }
+    }
   }
 
   const victory = totalDamage >= bossMaxHpTotal * (victoryThreshold / 100);

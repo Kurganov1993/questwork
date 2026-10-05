@@ -36,9 +36,19 @@ export async function pullImage(image: string): Promise<boolean> {
   return r.exitCode === 0;
 }
 
+/**
+ * Проверяет, существует ли Docker volume, и создаёт его, если нет.
+ * Это кэш для npm — сохраняется между запусками контейнеров,
+ * экономит 60–90 секунд на каждой установке зависимостей.
+ */
+async function ensureVolume(name: string): Promise<void> {
+  const check = await runProcess('docker', ['volume', 'inspect', name], 5_000);
+  if (check.exitCode === 0) return;
+  await runProcess('docker', ['volume', 'create', name], 10_000);
+}
+
 export type ContainerRunOpts = {
   image: string;
-  /** Локальная папка, содержимое которой копируется в /workspace контейнера */
   workDir: string;
   command: string;
   timeoutMs: number;
@@ -52,6 +62,11 @@ export type ContainerRunOpts = {
  * Запускает контейнер БЕЗ монтирования папки.
  * Файлы копируются через `docker cp` — это в 10–30 раз быстрее
  * на Windows, где bind-mount через virtiofs очень медленный.
+ *
+ * Особенности:
+ *   - volume `questwork-npm-cache` монтируется в /root/.npm —
+ *     переиспользуем npm-кэш между всеми контейнерами.
+ *   - Работаем в /workspace, куда копируются исходники.
  */
 export async function runContainer(opts: ContainerRunOpts): Promise<RunResult> {
   const {
@@ -60,7 +75,7 @@ export async function runContainer(opts: ContainerRunOpts): Promise<RunResult> {
     command,
     timeoutMs,
     memoryMb = 2048,
-    cpus = 1,
+    cpus = 2,
     network = 'bridge',
     env = {},
   } = opts;
@@ -69,7 +84,9 @@ export async function runContainer(opts: ContainerRunOpts): Promise<RunResult> {
   const t0 = Date.now();
 
   try {
-    // 1. Создаём контейнер (не запускаем)
+    // Готовим volume для npm-кэша (создаётся один раз)
+    await ensureVolume('questwork-npm-cache');
+
     const createArgs: string[] = [
       'create',
       '--name', name,
@@ -78,6 +95,8 @@ export async function runContainer(opts: ContainerRunOpts): Promise<RunResult> {
       '--network', network,
       '--workdir', '/workspace',
       '--tmpfs', '/tmp:rw,size=512m',
+      // Кэш npm
+      '-v', 'questwork-npm-cache:/root/.npm',
     ];
     for (const [k, v] of Object.entries(env)) {
       createArgs.push('-e', `${k}=${v}`);
@@ -96,7 +115,7 @@ export async function runContainer(opts: ContainerRunOpts): Promise<RunResult> {
       };
     }
 
-    // 2. Копируем содержимое локальной папки в /workspace контейнера
+    // Копируем исходники внутрь контейнера
     const normalizedDir = workDir.replace(/\\/g, '/');
     const cp = await runProcess(
       'docker',
@@ -115,7 +134,6 @@ export async function runContainer(opts: ContainerRunOpts): Promise<RunResult> {
       };
     }
 
-    // 3. Запускаем и ждём завершения
     const start = await runProcess('docker', ['start', name], 30_000);
     if (start.exitCode !== 0) {
       await runProcess('docker', ['rm', '-f', name], 15_000);
@@ -136,10 +154,8 @@ export async function runContainer(opts: ContainerRunOpts): Promise<RunResult> {
       await runProcess('docker', ['kill', name], 15_000);
     }
 
-    // 4. Забираем логи
     const logs = await runProcess('docker', ['logs', name], 30_000);
 
-    // 5. Получаем exit code
     let exitCode = -1;
     const inspect = await runProcess(
       'docker',

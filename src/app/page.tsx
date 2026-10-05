@@ -1,109 +1,614 @@
 import Link from 'next/link';
+import { eq, desc, and, sql } from 'drizzle-orm';
 import { db } from '@/db';
-import { quests } from '@/db/schema';
+import { quests, heroes, submissions, customers } from '@/db/schema';
+import { withRetry } from '@/lib/db-retry';
+import { getCurrentHero } from '@/lib/auth';
+import { HeroBackground } from '@/components/home/HeroBackground';
+import { AnimatedNumber } from '@/components/home/AnimatedNumber';
+import { VictoryTicker } from '@/components/home/VictoryTicker';
+import { QuestCard } from '@/components/home/QuestCard';
+import { HeroPodium } from '@/components/home/HeroPodium';
+import { HomeAnimations } from '@/components/animations/HomeAnimations';
+import { SplitHeroTitle } from '@/components/animations/SplitHeroTitle';
+import { MagneticButton } from '@/components/animations/MagneticButton';
+import { TiltCard } from '@/components/animations/TiltCard';
 
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  const allQuests = await db.select().from(quests).orderBy(quests.difficulty).limit(3);
+  const currentHero = await getCurrentHero();
+
+  const [topQuests, stats, topHeroes, recentVictories, clearedQuestIds] =
+    await Promise.all([
+      withRetry(
+        () =>
+          db
+            .select()
+            .from(quests)
+            .where(eq(quests.status, 'active'))
+            .orderBy(quests.difficulty)
+            .limit(3),
+        { label: 'home:quests' },
+      ).catch(() => []),
+
+      loadStats(),
+
+      withRetry(
+        () =>
+          db
+            .select({
+              id: heroes.id,
+              nickname: heroes.nickname,
+              heroClass: heroes.heroClass,
+              level: heroes.level,
+              xp: heroes.xp,
+              gold: heroes.gold,
+            })
+            .from(heroes)
+            .orderBy(desc(heroes.xp), desc(heroes.level))
+            .limit(3),
+        { label: 'home:heroes' },
+      ).catch(() => []),
+
+      withRetry(
+        () =>
+          db
+            .select({
+              id: submissions.id,
+              damageDealt: submissions.damageDealt,
+              heroNickname: heroes.nickname,
+              heroClass: heroes.heroClass,
+              questTitle: quests.title,
+              questIcon: quests.icon,
+              questSlug: quests.slug,
+              bossMaxHp: quests.bossMaxHp,
+              bossName: quests.bossName,
+            })
+            .from(submissions)
+            .innerJoin(heroes, eq(heroes.id, submissions.heroId))
+            .innerJoin(quests, eq(quests.id, submissions.questId))
+            .where(eq(submissions.status, 'victory'))
+            .orderBy(desc(submissions.createdAt))
+            .limit(8),
+        { label: 'home:victories' },
+      ).catch(() => []),
+
+      currentHero
+        ? withRetry(
+            () =>
+              db
+                .select({ questId: submissions.questId })
+                .from(submissions)
+                .where(
+                  and(
+                    eq(submissions.heroId, currentHero.id),
+                    eq(submissions.status, 'victory'),
+                  ),
+                )
+                .groupBy(submissions.questId),
+            { label: 'home:cleared' },
+          ).catch(() => [])
+        : Promise.resolve([]),
+    ]);
+
+  const clearedSet = new Set(clearedQuestIds.map((c) => c.questId));
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black">
-      {/* Hero */}
-      <section className="max-w-6xl mx-auto px-6 pt-20 pb-16 text-center">
-        <p className="text-amber-400/80 text-sm tracking-widest mb-4">НАЙМ КАК РЕЙД</p>
-        <h1 className="text-5xl md:text-6xl font-bold leading-tight mb-6">
-          Прокачай героя.<br />
-          Победи босса.<br />
-          <span className="text-amber-400">Получи работу.</span>
-        </h1>
-        <p className="text-zinc-400 max-w-2xl mx-auto mb-10 text-lg">
-          Здесь не откликаются на вакансии. Здесь берут квесты, сдают репозитории
-          и наносят урон боссу — фазе за фазой. Твоё портфолио — это твой персонаж.
-        </p>
-        <div className="flex gap-4 justify-center">
-          <Link
-            href="/quests"
-            className="px-6 py-3 rounded-md bg-amber-500 text-black font-semibold hover:bg-amber-400 transition"
-          >
-            К доске квестов
-          </Link>
-          <Link
-            href="/register"
-            className="px-6 py-3 rounded-md border border-zinc-700 hover:border-amber-500/60 transition"
-          >
-            Создать героя
-          </Link>
-        </div>
-      </section>
+    <main className="min-h-screen bg-zinc-950 text-zinc-100">
+      {/* ==================== HERO ==================== */}
+      <section className="relative overflow-hidden">
+        <HeroBackground />
 
-      {/* Quests */}
-      <section className="max-w-4xl mx-auto px-6 pb-20">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm text-zinc-500 tracking-widest">АКТИВНЫЕ КВЕСТЫ</h2>
-          <Link href="/quests" className="text-xs text-amber-400 hover:text-amber-300">
-            все квесты →
-          </Link>
-        </div>
-        <div className="space-y-3">
-          {allQuests.map((q) => {
-            const stars = '★'.repeat(q.difficulty) + '☆'.repeat(Math.max(0, 3 - q.difficulty));
-            return (
+        <div className="relative max-w-6xl mx-auto px-6 pt-24 pb-20 text-center">
+          <div className="animate-fade-in-up">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full glass text-xs text-amber-300 mb-8">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-dot" />
+              <span className="tracking-widest font-mono">НАЙМ КАК РЕЙД</span>
+              <span className="text-zinc-600">·</span>
+              <span className="text-zinc-400">
+                {stats.totalVictories > 0
+                  ? `${stats.totalVictories} побед на платформе`
+                  : 'первый сезон'}
+              </span>
+            </div>
+          </div>
+
+          <SplitHeroTitle />
+
+          <p
+            className="text-lg text-zinc-400 max-w-2xl mx-auto mb-10 animate-fade-in-up"
+            style={{ animationDelay: '0.4s' }}
+          >
+            Никаких откликов в пустоту. Сдаёшь GitHub-репозиторий — платформа
+            собирает его в Docker, прогоняет тесты, читает код через AI и
+            снимает HP с босса. Портфолио — твой персонаж.
+          </p>
+
+          <div
+            className="flex gap-4 justify-center flex-wrap animate-fade-in-up"
+            style={{ animationDelay: '0.5s' }}
+          >
+            <MagneticButton>
               <Link
-                key={q.id}
-                href={`/quests/${q.slug}`}
-                className="block rounded-xl border border-zinc-800 bg-zinc-900/50 p-5 hover:border-amber-500/40 transition"
+                href="/quests"
+                className="block px-7 py-3.5 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition shadow-[0_0_40px_-10px_rgba(251,191,36,0.6)] hover:shadow-[0_0_60px_-10px_rgba(251,191,36,0.8)]"
               >
-                <div className="flex items-start justify-between gap-6">
-                  <div className="flex items-start gap-4">
-                    <div className="text-3xl">{q.icon}</div>
-                    <div>
-                      <div className="text-xs text-amber-400 mb-1">
-                        СЛОЖНОСТЬ {stars}
-                      </div>
-                      <div className="text-lg font-semibold mb-1">{q.title}</div>
-                      <p className="text-sm text-zinc-400 mb-2 max-w-xl">
-                        {q.description}
-                      </p>
-                      <div className="flex gap-4 text-xs text-zinc-500">
-                        <span>👑 {q.bossName}</span>
-                        <span>❤️ {q.bossMaxHp} HP</span>
-                        <span>✨ {q.rewardXp} XP</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-amber-400 text-sm shrink-0 pt-2">→</div>
-                </div>
+                К доске квестов
               </Link>
-            );
-          })}
+            </MagneticButton>
+
+            <MagneticButton>
+              <Link
+                href={currentHero ? '/hero' : '/register'}
+                className="block px-7 py-3.5 rounded-lg glass hover:bg-white/5 font-semibold transition"
+              >
+                {currentHero ? 'Мой профиль' : 'Создать героя'}
+              </Link>
+            </MagneticButton>
+          </div>
+
+          {/* Статистика платформы */}
+          {stats.totalHeroes > 0 && (
+            <div
+              data-reveal
+              className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-3xl mx-auto mt-16"
+            >
+              <Stat label="героев" value={stats.totalHeroes} icon="🧙" />
+              <Stat label="квестов" value={stats.activeQuests} icon="📜" />
+              <Stat
+                label="побед"
+                value={stats.totalVictories}
+                icon="⚔️"
+                accent
+              />
+              <Stat label="компаний" value={stats.totalCustomers} icon="🏢" />
+            </div>
+          )}
         </div>
       </section>
 
-      {/* How */}
-      <section className="max-w-6xl mx-auto px-6 pb-24">
-        <h2 className="text-sm text-zinc-500 tracking-widest mb-8 text-center">
-          КАК ЭТО РАБОТАЕТ
-        </h2>
-        <div className="grid md:grid-cols-4 gap-6">
+      {/* ==================== ЖИВАЯ ЛЕНТА ==================== */}
+      {recentVictories.length > 0 && (
+        <VictoryTicker
+          victories={recentVictories.map((v) => ({
+            id: v.id,
+            heroNickname: v.heroNickname,
+            heroClass: v.heroClass,
+            questTitle: v.questTitle,
+            questIcon: v.questIcon,
+            questSlug: v.questSlug,
+            bossName: v.bossName,
+            damageDealt: v.damageDealt,
+            bossMaxHp: v.bossMaxHp,
+          }))}
+        />
+      )}
+
+      {/* ==================== КВЕСТЫ ==================== */}
+      <section className="relative max-w-4xl mx-auto px-6 py-20">
+        <div data-reveal>
+          <SectionHeader
+            title="АКТИВНЫЕ КВЕСТЫ"
+            link={{ href: '/quests', label: 'все квесты →' }}
+          />
+        </div>
+
+        {topQuests.length === 0 ? (
+          <div className="glass rounded-2xl p-10 text-center text-zinc-500">
+            Квестов пока нет.{' '}
+            <Link
+              href="/employer/register"
+              className="text-amber-400 hover:text-amber-300"
+            >
+              Создайте первый как работодатель
+            </Link>
+            .
+          </div>
+        ) : (
+          <div className="space-y-4" data-cascade>
+            {topQuests.map((q) => (
+              <div key={q.id} data-cascade-item>
+                <TiltCard max={3}>
+                  <QuestCard quest={q} cleared={clearedSet.has(q.id)} />
+                </TiltCard>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ==================== ЗАЛ СЛАВЫ ==================== */}
+      {topHeroes.length > 0 && (
+        <section className="relative max-w-5xl mx-auto px-6 py-16">
+          <div data-reveal>
+            <SectionHeader
+              title="ЗАЛ СЛАВЫ"
+              link={{ href: '/leaderboard', label: 'весь лидерборд →' }}
+              centered
+            />
+          </div>
+
+          <div data-podium>
+            <HeroPodium heroes={topHeroes} />
+          </div>
+
+          <div className="mt-8 text-center" data-reveal>
+            <Link
+              href="/leaderboard"
+              className="text-xs text-zinc-500 hover:text-amber-400 transition"
+            >
+              смотреть полный рейтинг героев
+            </Link>
+          </div>
+        </section>
+      )}
+
+      {/* ==================== КОМУ ЭТО ==================== */}
+      <section className="relative max-w-6xl mx-auto px-6 py-20">
+        <div data-reveal>
+          <SectionHeader title="КОМУ ЭТО НУЖНО" centered />
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-5" data-cascade>
+          <div data-cascade-item>
+            <TiltCard max={4}>
+              <AudienceCard
+                icon="🧙"
+                title="Разработчикам"
+                subtitle="Хватит отправлять резюме в пустоту"
+                bullets={[
+                  'Docker реально собирает твой проект',
+                  'ESLint + Semgrep находят баги и уязвимости',
+                  'AI-ревью читает код и объясняет, что улучшить',
+                  'Профиль с артефактами вместо PDF-резюме',
+                ]}
+                cta={{ href: '/register', label: 'Создать героя' }}
+                accent="amber"
+              />
+            </TiltCard>
+          </div>
+
+          <div data-cascade-item>
+            <TiltCard max={4}>
+              <AudienceCard
+                icon="🏢"
+                title="Работодателям"
+                subtitle="Хватит читать «уверенное владение React»"
+                bullets={[
+                  'Публикуй задачи с проверяемыми критериями',
+                  'Автоматическая проверка каждой сдачи',
+                  'Воронка: шортлист → интервью → найм',
+                  'Публичные профили героев без логина',
+                ]}
+                cta={{ href: '/employer/register', label: 'Создать квест' }}
+                accent="violet"
+              />
+            </TiltCard>
+          </div>
+        </div>
+      </section>
+
+      {/* ==================== КАК ЭТО РАБОТАЕТ ==================== */}
+      <section className="relative max-w-6xl mx-auto px-6 py-20">
+        <div data-reveal>
+          <SectionHeader title="КАК ЭТО РАБОТАЕТ" centered />
+        </div>
+
+        <div className="grid md:grid-cols-4 gap-4" data-cascade>
           {[
-            { n: '01', t: 'Выбери класс', d: 'Frontend Mage, Backend Warrior, DevOps Paladin и другие.' },
-            { n: '02', t: 'Возьми квест', d: 'Реальная задача с критериями приёмки и боссом.' },
-            { n: '03', t: 'Сдай репозиторий', d: 'GitHub-ссылка. Платформа проверяет код по фазам.' },
-            { n: '04', t: 'Победи босса', d: 'Получи XP, лут и репутацию. Портфолио растёт.' },
+            {
+              n: '01',
+              t: 'Выбери класс',
+              d: 'Frontend Mage, Backend Warrior, DevOps Paladin, QA Rogue.',
+              icon: '🧙',
+            },
+            {
+              n: '02',
+              t: 'Возьми квест',
+              d: 'Задача с критериями и боссом. Набор фаз проверки.',
+              icon: '📜',
+            },
+            {
+              n: '03',
+              t: 'Сдай репозиторий',
+              d: 'Docker собирает, тесты прогоняются, AI читает код.',
+              icon: '⚔️',
+            },
+            {
+              n: '04',
+              t: 'Победи босса',
+              d: 'XP, золото, артефакты, достижения. Профиль растёт.',
+              icon: '🏆',
+            },
           ].map((s) => (
-            <div key={s.n} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
-              <div className="text-amber-500/70 text-xs mb-2">{s.n}</div>
-              <div className="font-semibold mb-2">{s.t}</div>
-              <div className="text-sm text-zinc-400">{s.d}</div>
+            <div key={s.n} data-cascade-item>
+              <div className="glass rounded-2xl p-5 card-glow h-full">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-3xl drop-shadow-[0_0_16px_rgba(251,191,36,0.2)]">
+                    {s.icon}
+                  </div>
+                  <div className="text-xs font-mono text-amber-500/60">
+                    {s.n}
+                  </div>
+                </div>
+                <div className="font-semibold mb-2">{s.t}</div>
+                <div className="text-sm text-zinc-400 leading-relaxed">
+                  {s.d}
+                </div>
+              </div>
             </div>
           ))}
         </div>
       </section>
 
-      <footer className="border-t border-zinc-800/60 py-6 text-center text-xs text-zinc-600">
-        QuestWork · прототип
+      {/* ==================== ФИНАЛЬНЫЙ CTA ==================== */}
+      <section className="relative max-w-4xl mx-auto px-6 py-20">
+        <div
+          data-reveal
+          className="relative glass-strong rounded-3xl p-12 text-center overflow-hidden"
+        >
+          <div
+            data-glow
+            className="absolute -top-32 left-1/2 -translate-x-1/2 w-[400px] h-[400px] rounded-full bg-amber-500/20 blur-[100px]"
+          />
+
+          <div className="relative">
+            <div className="text-5xl mb-6 drop-shadow-[0_0_30px_rgba(251,191,36,0.5)]">
+              ⚔️
+            </div>
+            <h2 className="text-3xl md:text-4xl font-bold mb-4">
+              Один репозиторий —<br />
+              <span className="text-gradient-amber">и ты знаешь всё</span>
+            </h2>
+            <p className="text-zinc-400 mb-8 max-w-lg mx-auto">
+              Не нужно ждать ответа HR-бота. Сдай квест и получи полный отчёт:
+              собирается ли код, что говорит линтер, что находит AI и сколько
+              HP осталось у босса.
+            </p>
+
+            <div className="flex gap-4 justify-center flex-wrap">
+              <MagneticButton>
+                <Link
+                  href={currentHero ? '/quests' : '/register'}
+                  className="block px-7 py-3.5 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition shadow-[0_0_40px_-10px_rgba(251,191,36,0.6)]"
+                >
+                  {currentHero ? 'Выбрать квест' : 'Начать путь героя'}
+                </Link>
+              </MagneticButton>
+
+              <MagneticButton>
+                <Link
+                  href="/quests"
+                  className="block px-7 py-3.5 rounded-lg glass hover:bg-white/5 font-semibold transition"
+                >
+                  Посмотреть квесты
+                </Link>
+              </MagneticButton>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ==================== FOOTER ==================== */}
+      <footer className="border-t border-white/5 py-10 mt-8">
+        <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-md bg-amber-500/20 border border-amber-500/40 grid place-items-center text-amber-400 font-bold">
+              Q
+            </div>
+            <div>
+              <div className="text-sm font-semibold tracking-wide">
+                QUESTWORK
+              </div>
+              <div className="text-xs text-zinc-600">
+                найм как рейд · прототип
+              </div>
+            </div>
+          </div>
+
+          <nav className="flex flex-wrap gap-6 text-sm text-zinc-500">
+            <Link href="/quests" className="hover:text-amber-400 transition">
+              Квесты
+            </Link>
+            <Link
+              href="/leaderboard"
+              className="hover:text-amber-400 transition"
+            >
+              Лидерборд
+            </Link>
+            <Link href="/employer" className="hover:text-amber-400 transition">
+              Работодателям
+            </Link>
+            <Link href="/register" className="hover:text-amber-400 transition">
+              Создать героя
+            </Link>
+          </nav>
+        </div>
       </footer>
+
+      {/* ==================== GSAP-АНИМАЦИИ ==================== */}
+      <HomeAnimations />
     </main>
   );
+}
+
+// ==================== ХЕЛПЕРЫ ====================
+
+function Stat({
+  label,
+  value,
+  icon,
+  accent = false,
+}: {
+  label: string;
+  value: number;
+  icon: string;
+  accent?: boolean;
+}) {
+  return (
+    <div className="glass rounded-xl p-4 text-center">
+      <div className="text-2xl mb-1">{icon}</div>
+      <div
+        className={`text-2xl font-bold ${
+          accent ? 'text-gradient-amber' : 'text-zinc-100'
+        }`}
+      >
+        <AnimatedNumber value={value} />
+      </div>
+      <div className="text-xs text-zinc-500 mt-0.5 tracking-wide uppercase">
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function SectionHeader({
+  title,
+  link,
+  centered = false,
+}: {
+  title: string;
+  link?: { href: string; label: string };
+  centered?: boolean;
+}) {
+  return (
+    <div
+      className={`flex items-center ${
+        centered ? 'justify-center' : 'justify-between'
+      } mb-8 gap-4`}
+    >
+      <div className="flex items-center gap-3">
+        <div className="h-px w-8 bg-gradient-to-r from-transparent to-amber-500/60" />
+        <h2 className="text-sm font-mono tracking-[0.2em] text-zinc-500">
+          {title}
+        </h2>
+        <div className="h-px w-8 bg-gradient-to-l from-transparent to-amber-500/60" />
+      </div>
+      {link && (
+        <Link
+          href={link.href}
+          className="text-xs text-amber-400 hover:text-amber-300 transition whitespace-nowrap"
+        >
+          {link.label}
+        </Link>
+      )}
+    </div>
+  );
+}
+
+function AudienceCard({
+  icon,
+  title,
+  subtitle,
+  bullets,
+  cta,
+  accent,
+}: {
+  icon: string;
+  title: string;
+  subtitle: string;
+  bullets: string[];
+  cta: { href: string; label: string };
+  accent: 'amber' | 'violet';
+}) {
+  const accentGradient =
+    accent === 'amber'
+      ? 'from-amber-500/20 to-transparent'
+      : 'from-violet-500/20 to-transparent';
+
+  const accentText =
+    accent === 'amber' ? 'text-amber-400' : 'text-violet-400';
+
+  const ctaClass =
+    accent === 'amber'
+      ? 'bg-amber-500 text-black hover:bg-amber-400'
+      : 'border border-violet-500/40 text-violet-300 hover:bg-violet-500/10';
+
+  return (
+    <div className="glass rounded-2xl p-7 relative overflow-hidden card-glow h-full">
+      <div
+        className={`absolute -top-24 -right-24 w-64 h-64 rounded-full bg-gradient-to-br ${accentGradient} blur-3xl`}
+      />
+
+      <div className="relative">
+        <div className="text-4xl mb-4">{icon}</div>
+        <h3 className="text-2xl font-semibold mb-1">{title}</h3>
+        <p className={`text-sm ${accentText} mb-6`}>{subtitle}</p>
+
+        <ul className="space-y-3 mb-7">
+          {bullets.map((b, i) => (
+            <li key={i} className="flex gap-3 text-sm text-zinc-300">
+              <span
+                className={`shrink-0 mt-0.5 ${
+                  accent === 'amber' ? 'text-amber-400' : 'text-violet-400'
+                }`}
+              >
+                ✓
+              </span>
+              <span>{b}</span>
+            </li>
+          ))}
+        </ul>
+
+        <Link
+          href={cta.href}
+          className={`block w-full text-center px-5 py-3 rounded-lg font-semibold transition ${ctaClass}`}
+        >
+          {cta.label}
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+async function loadStats() {
+  const empty = {
+    totalHeroes: 0,
+    activeQuests: 0,
+    totalVictories: 0,
+    totalCustomers: 0,
+  };
+
+  try {
+    const [heroesCount, questsCount, victoriesCount, customersCount] =
+      await Promise.all([
+        withRetry(
+          () =>
+            db.select({ count: sql<number>`count(*)::int` }).from(heroes),
+          { label: 'home:stat-heroes' },
+        ).then((r) => Number(r[0]?.count ?? 0)),
+        withRetry(
+          () =>
+            db
+              .select({ count: sql<number>`count(*)::int` })
+              .from(quests)
+              .where(eq(quests.status, 'active')),
+          { label: 'home:stat-quests' },
+        ).then((r) => Number(r[0]?.count ?? 0)),
+        withRetry(
+          () =>
+            db
+              .select({ count: sql<number>`count(*)::int` })
+              .from(submissions)
+              .where(eq(submissions.status, 'victory')),
+          { label: 'home:stat-victories' },
+        ).then((r) => Number(r[0]?.count ?? 0)),
+        withRetry(
+          () =>
+            db.select({ count: sql<number>`count(*)::int` }).from(customers),
+          { label: 'home:stat-customers' },
+        ).then((r) => Number(r[0]?.count ?? 0)),
+      ]);
+
+    return {
+      totalHeroes: heroesCount,
+      activeQuests: questsCount,
+      totalVictories: victoriesCount,
+      totalCustomers: customersCount,
+    };
+  } catch (e) {
+    console.error('[home] stats failed:', (e as Error).message);
+    return empty;
+  }
 }

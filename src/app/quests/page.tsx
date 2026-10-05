@@ -4,13 +4,28 @@ import { db } from '@/db';
 import { quests, submissions } from '@/db/schema';
 import { getCurrentHero } from '@/lib/auth';
 import { withRetry } from '@/lib/db-retry';
+import { QuestCard } from '@/components/home/QuestCard';
+import { TiltCard } from '@/components/animations/TiltCard';
+import { HeroBackground } from '@/components/home/HeroBackground';
 
 export const dynamic = 'force-dynamic';
 
-export default async function QuestsPage() {
+type Filter = 'all' | 'available' | 'cleared';
+
+function parseFilter(value: string | undefined): Filter {
+  if (value === 'available' || value === 'cleared') return value;
+  return 'all';
+}
+
+export default async function QuestsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ filter?: string }>;
+}) {
+  const { filter: filterRaw } = await searchParams;
+  const filter = parseFilter(filterRaw);
   const hero = await getCurrentHero();
 
-  // Список квестов — с retry, при сбое покажем пустую доску
   let allQuests: (typeof quests.$inferSelect)[] = [];
   try {
     allQuests = await withRetry(
@@ -26,8 +41,7 @@ export default async function QuestsPage() {
     console.error('[quests] не удалось загрузить квесты:', (e as Error).message);
   }
 
-  // Победы текущего героя по квестам — необязательный блок,
-  // при сбое просто не показываем метку «пройден»
+  // Победы текущего героя по квестам
   let victoriesByQuest: Record<number, number> = {};
   if (hero && allQuests.length > 0) {
     try {
@@ -54,78 +68,276 @@ export default async function QuestsPage() {
     }
   }
 
+  const totalQuests = allQuests.length;
+  const clearedCount = allQuests.filter(
+    (q) => (victoriesByQuest[q.id] ?? 0) > 0,
+  ).length;
+
+  const visibleQuests = allQuests.filter((q) => {
+    const cleared = (victoriesByQuest[q.id] ?? 0) > 0;
+    if (filter === 'cleared') return cleared;
+    if (filter === 'available') return !cleared;
+    return true;
+  });
+
+  const totalXpAvailable = visibleQuests.reduce(
+    (sum, q) => sum + q.rewardXp,
+    0,
+  );
+
+  const FILTERS: { value: Filter; label: string; count: number }[] = [
+    { value: 'all', label: 'Все', count: totalQuests },
+    {
+      value: 'available',
+      label: 'Доступные',
+      count: totalQuests - clearedCount,
+    },
+    { value: 'cleared', label: 'Пройденные', count: clearedCount },
+  ];
+
   return (
-    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-6 py-10">
-      <div className="max-w-4xl mx-auto">
-        <Link href="/" className="text-sm text-zinc-500 hover:text-amber-400">
-          ← На главную
-        </Link>
+    <main className="min-h-screen bg-zinc-950 text-zinc-100">
+      {/* ==================== HERO ==================== */}
+      <section className="relative overflow-hidden">
+        <HeroBackground />
 
-        <h1 className="text-3xl font-bold mt-6 mb-2">Доска квестов</h1>
-        <p className="text-zinc-400 mb-8">
-          Возьми квест, сдай репозиторий, победи босса.
-        </p>
+        <div className="relative max-w-5xl mx-auto px-6 pt-16 pb-12">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-amber-400 transition"
+          >
+            ← На главную
+          </Link>
 
-        {allQuests.length === 0 ? (
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-8 text-center text-zinc-500 text-sm">
-            <div className="text-4xl mb-3">📭</div>
-            Квестов пока нет. Зайди позже или создай свой в{' '}
-            <Link
-              href="/employer"
-              className="text-amber-400 hover:text-amber-300"
-            >
-              кабинете работодателя
-            </Link>
-            .
+          <div className="mt-6 flex items-end justify-between gap-6 flex-wrap">
+            <div>
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full glass text-xs text-amber-300 mb-4">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-dot" />
+                <span className="tracking-widest font-mono">
+                  {totalQuests} КВЕСТОВ ОТКРЫТО
+                </span>
+              </div>
+              <h1 className="text-4xl sm:text-5xl font-bold mb-3">
+                Доска <span className="text-gradient-amber">квестов</span>
+              </h1>
+              <p className="text-zinc-400 max-w-xl">
+                Возьми задачу, сдай GitHub-репозиторий, победи босса. Каждая
+                сдача проходит через Docker, ESLint и AI-ревью.
+              </p>
+            </div>
+
+            {/* Статистика справа */}
+            {hero && (
+              <div className="flex gap-3 flex-wrap">
+                <MiniStat
+                  label="Пройдено"
+                  value={`${clearedCount}/${totalQuests}`}
+                  icon="✔"
+                  accent
+                />
+                <MiniStat
+                  label="Доступно XP"
+                  value={totalXpAvailable.toLocaleString('ru-RU')}
+                  icon="✨"
+                />
+              </div>
+            )}
           </div>
+
+          {/* Фильтры */}
+          {hero && totalQuests > 0 && (
+            <div className="mt-8 flex gap-2 flex-wrap">
+              {FILTERS.map((f) => {
+                const active = filter === f.value;
+                return (
+                  <Link
+                    key={f.value}
+                    href={
+                      f.value === 'all'
+                        ? '/quests'
+                        : `/quests?filter=${f.value}`
+                    }
+                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition border ${
+                      active
+                        ? 'bg-amber-500 text-black border-amber-500 font-semibold'
+                        : 'border-zinc-800 text-zinc-400 hover:border-amber-500/60 hover:text-amber-400'
+                    }`}
+                  >
+                    <span>{f.label}</span>
+                    <span
+                      className={`text-xs font-mono px-1.5 py-0.5 rounded ${
+                        active
+                          ? 'bg-black/20 text-black'
+                          : 'bg-white/5 text-zinc-500'
+                      }`}
+                    >
+                      {f.count}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ==================== СПИСОК ==================== */}
+      <section className="relative max-w-5xl mx-auto px-6 pb-20">
+        {visibleQuests.length === 0 ? (
+          <EmptyState filter={filter} totalQuests={totalQuests} />
         ) : (
-          <div className="space-y-4">
-            {allQuests.map((q) => {
-              const stars =
-                '★'.repeat(q.difficulty) +
-                '☆'.repeat(Math.max(0, 5 - q.difficulty));
-              const cleared = (victoriesByQuest[q.id] ?? 0) > 0;
-              return (
-                <Link
-                  key={q.id}
-                  href={`/quests/${q.slug}`}
-                  className="block rounded-xl border border-zinc-800 bg-zinc-900/40 p-6 hover:border-amber-500/60 transition"
-                >
-                  <div className="flex items-start justify-between gap-6">
-                    <div className="flex items-start gap-4">
-                      <div className="text-4xl">{q.icon}</div>
-                      <div>
-                        <div className="text-xs text-amber-400 mb-1">
-                          СЛОЖНОСТЬ {stars}
-                        </div>
-                        <h2 className="text-xl font-semibold mb-2">
-                          {q.title}
-                        </h2>
-                        <p className="text-zinc-400 text-sm mb-3 max-w-xl">
-                          {q.description}
-                        </p>
-                        <div className="flex flex-wrap gap-4 text-xs text-zinc-500">
-                          <span>👑 {q.bossName}</span>
-                          <span>❤️ {q.bossMaxHp} HP</span>
-                          <span>✨ {q.rewardXp} XP</span>
-                          <span>🪙 {q.rewardGold}</span>
-                          <span>порог {q.victoryThreshold}%</span>
-                          {cleared && (
-                            <span className="text-emerald-400">✔ пройден</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-amber-400 text-sm shrink-0 pt-2">
-                      →
-                    </div>
-                  </div>
-                </Link>
-              );
-            })}
+          <div className="space-y-4" data-cascade>
+            {visibleQuests.map((q) => (
+              <div key={q.id} data-cascade-item data-reveal>
+                <TiltCard max={3}>
+                  <QuestCard
+                    quest={q}
+                    cleared={(victoriesByQuest[q.id] ?? 0) > 0}
+                  />
+                </TiltCard>
+              </div>
+            ))}
           </div>
         )}
-      </div>
+      </section>
+
+      {/* ==================== НИЖНИЙ CTA ==================== */}
+      <section className="relative max-w-4xl mx-auto px-6 pb-20">
+        <div className="relative glass-strong rounded-3xl p-10 text-center overflow-hidden">
+          <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[400px] h-[400px] rounded-full bg-amber-500/20 blur-[100px] animate-pulse-glow" />
+
+          <div className="relative">
+            <div className="text-4xl mb-4">🏢</div>
+            <h2 className="text-2xl md:text-3xl font-bold mb-3">
+              Хочешь создать свой квест?
+            </h2>
+            <p className="text-zinc-400 mb-6 max-w-lg mx-auto">
+              Опиши задачу, задай критерии проверки — и герои начнут её
+              проходить. Автоматическая проверка через Docker, ESLint и AI.
+            </p>
+            <div className="flex gap-4 justify-center flex-wrap">
+              <Link
+                href="/employer/register"
+                className="px-6 py-3 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition shadow-[0_0_40px_-10px_rgba(251,191,36,0.6)]"
+              >
+                Стать работодателем
+              </Link>
+              <Link
+                href="/leaderboard"
+                className="px-6 py-3 rounded-lg glass hover:bg-white/5 font-semibold transition"
+              >
+                Смотреть лидерборд
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
   );
+}
+
+// ==================== ХЕЛПЕРЫ ====================
+
+function MiniStat({
+  label,
+  value,
+  icon,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  icon: string;
+  accent?: boolean;
+}) {
+  return (
+    <div className="glass rounded-xl px-4 py-3 min-w-[130px]">
+      <div className="flex items-center gap-2 text-xs text-zinc-500 mb-1">
+        <span>{icon}</span>
+        <span className="tracking-wide uppercase">{label}</span>
+      </div>
+      <div
+        className={`text-xl font-bold ${
+          accent ? 'text-gradient-amber' : 'text-zinc-100'
+        }`}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({
+  filter,
+  totalQuests,
+}: {
+  filter: Filter;
+  totalQuests: number;
+}) {
+  if (totalQuests === 0) {
+    return (
+      <div className="glass rounded-2xl p-12 text-center">
+        <div className="text-5xl mb-4">📭</div>
+        <h2 className="text-xl font-semibold mb-2">Квестов пока нет</h2>
+        <p className="text-zinc-400 mb-6 max-w-md mx-auto">
+          Платформа только запускается. Создай первый квест как работодатель —
+          или загляни позже.
+        </p>
+        <Link
+          href="/employer/register"
+          className="inline-block px-6 py-3 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition"
+        >
+          Создать квест
+        </Link>
+      </div>
+    );
+  }
+
+  if (filter === 'cleared') {
+    return (
+      <div className="glass rounded-2xl p-12 text-center">
+        <div className="text-5xl mb-4">🎯</div>
+        <h2 className="text-xl font-semibold mb-2">Ты ещё ничего не прошёл</h2>
+        <p className="text-zinc-400 mb-6 max-w-md mx-auto">
+          Возьми первый квест — сдай репозиторий и победи босса.
+        </p>
+        <Link
+          href="/quests"
+          className="inline-block px-6 py-3 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition"
+        >
+          Показать все квесты
+        </Link>
+      </div>
+    );
+  }
+
+  if (filter === 'available') {
+    return (
+      <div className="glass rounded-2xl p-12 text-center">
+        <div className="text-5xl mb-4">👑</div>
+        <h2 className="text-xl font-semibold mb-2">
+          Все квесты пройдены
+        </h2>
+        <p className="text-zinc-400 mb-6 max-w-md mx-auto">
+          Ты победил всех доступных боссов. Смотри прогресс в профиле или
+          дождись новых квестов.
+        </p>
+        <div className="flex gap-3 justify-center flex-wrap">
+          <Link
+            href="/hero"
+            className="px-6 py-3 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition"
+          >
+            Мой профиль
+          </Link>
+          <Link
+            href="/leaderboard"
+            className="px-6 py-3 rounded-lg glass hover:bg-white/5 font-semibold transition"
+          >
+            Лидерборд
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }
