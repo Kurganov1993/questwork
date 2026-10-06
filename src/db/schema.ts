@@ -233,6 +233,19 @@ export const heroAchievements = pgTable(
   }),
 );
 
+export const githubAccounts = pgTable('github_accounts', {
+  id: serial('id').primaryKey(),
+  heroId: integer('hero_id')
+    .notNull()
+    .unique()
+    .references(() => heroes.id, { onDelete: 'cascade' }),
+  githubId: varchar('github_id', { length: 64 }).notNull(),
+  githubUsername: varchar('github_username', { length: 128 }).notNull(),
+  accessToken: text('access_token').notNull(),
+  avatarUrl: varchar('avatar_url', { length: 512 }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
 // ============================================================
 // Типы
 // ============================================================

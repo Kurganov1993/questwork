@@ -91,7 +91,8 @@ async function gh<T>(path: string, attempt = 1): Promise<T> {
         reason = `GitHub 403: доступ запрещён. ${body.slice(0, 150)}`;
       }
     } else if (res.status === 404) {
-      reason = 'GitHub 404: репозиторий не найден или приватный.';
+      reason =
+        'Репозиторий не найден или приватный. Платформа проверяет только публичные — сделай репо публичным и попробуй снова.';
     } else {
       reason = `GitHub ${res.status}: ${body.slice(0, 200)}`;
     }
@@ -101,8 +102,6 @@ async function gh<T>(path: string, attempt = 1): Promise<T> {
 
   return res.json() as Promise<T>;
 }
-
-// ---------- Типы ----------
 
 export type GhRepo = {
   full_name: string;
@@ -145,8 +144,6 @@ type GhTreeResponse = {
   truncated: boolean;
 };
 
-// ---------- Публичные методы ----------
-
 export const getRepo = (owner: string, repo: string) =>
   gh<GhRepo>(`/repos/${owner}/${repo}`);
 
@@ -158,7 +155,6 @@ export const getRootContents = (owner: string, repo: string) =>
 
 /**
  * Полное дерево репозитория ОДНИМ запросом через Git Trees API.
- * Быстрее, чем рекурсивный обход Contents API в десятки раз.
  */
 export async function listTree(
   owner: string,
@@ -176,7 +172,9 @@ export async function listTree(
   let data: GhTreeResponse;
   try {
     data = await gh<GhTreeResponse>(
-      `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+      `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(
+        branch,
+      )}?recursive=1`,
     );
   } catch (e) {
     console.error('[listTree] trees API failed:', (e as Error).message);
@@ -270,7 +268,7 @@ export async function getFilesBatch(
         const text = await getFileText(owner, repo, path);
         if (text !== null) result.set(path, text);
       } catch {
-        // молча пропускаем — один плохой файл не должен ломать фазу
+        // молча пропускаем
       }
     }
   }

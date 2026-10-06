@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { quests, bossPhases, submissions } from '@/db/schema';
 import { getCurrentHero } from '@/lib/auth';
@@ -13,9 +13,9 @@ export const dynamic = 'force-dynamic';
 export default async function VerifyPage({
   searchParams,
 }: {
-  searchParams: Promise<{ quest?: string }>;
+  searchParams: Promise<{ quest?: string; repo?: string }>;
 }) {
-  const { quest: questSlug } = await searchParams;
+  const { quest: questSlug, repo: initialRepo } = await searchParams;
   const hero = await getCurrentHero();
   if (!hero) redirect('/login');
 
@@ -119,7 +119,6 @@ export default async function VerifyPage({
               </p>
             </div>
 
-            {/* Иконка квеста */}
             <div className="shrink-0 text-6xl leading-none drop-shadow-[0_0_30px_rgba(251,191,36,0.35)]">
               {quest.icon}
             </div>
@@ -134,16 +133,13 @@ export default async function VerifyPage({
                 <div className="text-xs text-zinc-500 font-mono mb-1">
                   {stars} · СЛОЖНОСТЬ {quest.difficulty}
                 </div>
-                <div className="text-lg font-semibold mb-1">
-                  {quest.title}
-                </div>
+                <div className="text-lg font-semibold mb-1">{quest.title}</div>
                 <div className="text-xs text-zinc-500">
                   👑 {quest.bossName} · ❤️ {quest.bossMaxHp} HP · ✨{' '}
                   {quest.rewardXp} XP · 🪙 {quest.rewardGold}
                 </div>
               </div>
 
-              {/* Прогресс героя на этом квесте */}
               {heroAttempts.total > 0 && (
                 <div className="flex gap-3 shrink-0">
                   <MiniStat
@@ -171,6 +167,21 @@ export default async function VerifyPage({
               </div>
             )}
           </div>
+
+          {/* Ссылка на GitHub-репозитории */}
+          <div className="mt-5 flex items-center justify-between gap-3 flex-wrap text-xs">
+            <Link
+              href="/hero/github"
+              className="inline-flex items-center gap-2 text-zinc-500 hover:text-amber-400 transition"
+            >
+              🐙 Мои репозитории GitHub →
+            </Link>
+            {initialRepo && (
+              <span className="text-emerald-400">
+                ✓ репозиторий подставлен из GitHub
+              </span>
+            )}
+          </div>
         </div>
       </section>
 
@@ -182,6 +193,7 @@ export default async function VerifyPage({
           bossName={quest.bossName}
           bossMaxHp={quest.bossMaxHp}
           phaseNames={phaseNames}
+          initialRepo={initialRepo}
         />
       </section>
 

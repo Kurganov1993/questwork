@@ -9,6 +9,7 @@ import {
   artifacts,
   heroAchievements,
   achievements as achievementsTable,
+  githubAccounts,
 } from '@/db/schema';
 import { getCurrentHero } from '@/lib/auth';
 import { HERO_CLASSES } from '@/lib/constants';
@@ -150,6 +151,25 @@ export default async function HeroPage() {
     { label: 'hero:list-achievements' },
   );
 
+  // GitHub-аккаунт (если подключён)
+  let github: { username: string; avatarUrl: string | null } | null = null;
+  try {
+    const [gh] = await withRetry(
+      () =>
+        db
+          .select({
+            username: githubAccounts.githubUsername,
+            avatarUrl: githubAccounts.avatarUrl,
+          })
+          .from(githubAccounts)
+          .where(eq(githubAccounts.heroId, hero.id)),
+      { label: 'hero:github-account' },
+    );
+    github = gh ?? null;
+  } catch (e) {
+    console.error('[hero] github failed:', (e as Error).message);
+  }
+
   const victories = mySubs.filter((s) => s.status === 'victory').length;
   const defeats = mySubs.filter((s) => s.status === 'defeat').length;
   const totalAttempts = mySubs.length;
@@ -179,7 +199,6 @@ export default async function HeroPage() {
             <div className="absolute -top-32 -right-32 w-80 h-80 rounded-full bg-amber-500/15 blur-[100px]" />
 
             <div className="relative flex flex-col sm:flex-row items-start gap-6">
-              {/* Аватар класса */}
               <div className="shrink-0 relative">
                 <div className="w-24 h-24 rounded-full bg-gradient-to-br from-amber-500/30 to-amber-500/5 border border-amber-500/40 grid place-items-center text-5xl drop-shadow-[0_0_25px_rgba(251,191,36,0.4)]">
                   {cls?.icon ?? '🧙'}
@@ -194,7 +213,6 @@ export default async function HeroPage() {
                   {hero.nickname}
                 </h1>
 
-                {/* Основные статы */}
                 <div className="flex flex-wrap gap-x-6 gap-y-3">
                   <StatCell
                     label="Уровень"
@@ -229,7 +247,6 @@ export default async function HeroPage() {
                 </div>
               </div>
 
-              {/* Ссылки справа */}
               <div className="flex flex-col items-start sm:items-end gap-2 shrink-0">
                 <Link
                   href="/hero/invitations"
@@ -242,6 +259,18 @@ export default async function HeroPage() {
                   className="text-xs text-zinc-500 hover:text-amber-400 transition"
                 >
                   Публичный профиль →
+                </Link>
+                <Link
+                  href="/hero/github"
+                  className="text-xs text-zinc-500 hover:text-amber-400 transition"
+                >
+                  {github ? (
+                    <>
+                      🐙 @{github.username} →
+                    </>
+                  ) : (
+                    <>🐙 Подключить GitHub →</>
+                  )}
                 </Link>
                 <LogoutButton />
               </div>
@@ -272,6 +301,34 @@ export default async function HeroPage() {
                 value={String(defeats)}
                 icon="💀"
               />
+            </div>
+          )}
+
+          {/* CTA подключить GitHub */}
+          {!github && (
+            <div className="mt-5 glass rounded-2xl p-5 relative overflow-hidden">
+              <div className="absolute -top-20 -left-20 w-64 h-64 rounded-full bg-violet-500/15 blur-[80px]" />
+
+              <div className="relative flex items-center justify-between gap-5 flex-wrap">
+                <div className="flex items-start gap-4">
+                  <div className="text-3xl shrink-0">🐙</div>
+                  <div>
+                    <div className="font-semibold mb-1">
+                      Подключи GitHub
+                    </div>
+                    <div className="text-xs text-zinc-500 max-w-lg">
+                      Сдавай квесты в один клик — выбирай репозиторий из
+                      списка, без копирования ссылок.
+                    </div>
+                  </div>
+                </div>
+                <a
+                  href="/api/auth/github"
+                  className="shrink-0 px-5 py-2.5 rounded-xl bg-violet-500/20 border border-violet-500/40 text-violet-300 hover:bg-violet-500/30 transition text-sm font-medium"
+                >
+                  Подключить →
+                </a>
+              </div>
             </div>
           )}
         </div>
@@ -373,13 +430,11 @@ export default async function HeroPage() {
                   }`}
                 >
                   <div className="flex items-start gap-4 flex-wrap">
-                    {/* Иконка квеста */}
                     <div className="text-3xl shrink-0">
                       {s.questIcon ?? (victory ? '⚔️' : '💀')}
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      {/* Заголовок + статус победы */}
                       <div className="flex items-center gap-3 mb-1 flex-wrap">
                         <Link
                           href={s.questSlug ? `/quests/${s.questSlug}` : '#'}
@@ -401,14 +456,12 @@ export default async function HeroPage() {
                         </span>
                       </div>
 
-                      {/* Босс */}
                       {s.bossName && (
                         <div className="text-xs text-zinc-500 mb-2">
                           👑 {s.bossName}
                         </div>
                       )}
 
-                      {/* Репозиторий */}
                       <a
                         href={s.repoUrl}
                         target="_blank"
@@ -423,7 +476,6 @@ export default async function HeroPage() {
                       </div>
                     </div>
 
-                    {/* Прогресс-полоса урона справа */}
                     <div className="shrink-0 w-24 sm:w-32">
                       <div className="text-xs text-zinc-500 mb-1 text-right">
                         {s.damageDealt} / {s.bossMaxHp}
@@ -441,7 +493,6 @@ export default async function HeroPage() {
                     </div>
                   </div>
 
-                  {/* Статус работодателя */}
                   {s.employerStatus && (
                     <div className="mt-3 pt-3 border-t border-white/5">
                       <span
