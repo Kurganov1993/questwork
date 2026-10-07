@@ -5,6 +5,8 @@ import { getCurrentHero } from '@/lib/auth';
 import { countUnseenNotifications } from '@/lib/notifications';
 import { SmoothScroll } from '@/components/animations/SmoothScroll';
 import { HeaderNav } from '@/components/layout/HeaderNav';
+import { BetaBanner } from '@/components/legal/BetaBanner';
+import { CookieBanner } from '@/components/legal/CookieBanner';
 
 const inter = Inter({ subsets: ['latin', 'cyrillic'] });
 
@@ -35,6 +37,7 @@ export default async function RootLayout({
         className={`${inter.className} bg-zinc-950 text-zinc-100 antialiased`}
       >
         <SmoothScroll>
+          <BetaBanner />
           <HeaderNav
             hero={
               hero
@@ -50,6 +53,7 @@ export default async function RootLayout({
             unseen={unseen}
           />
           {children}
+          <CookieBanner />
         </SmoothScroll>
       </body>
     </html>

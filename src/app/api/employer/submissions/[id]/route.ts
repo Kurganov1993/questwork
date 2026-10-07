@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { submissions, quests } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { getCurrentCustomer } from '@/lib/customer-auth';
 import { EMPLOYER_STATUSES } from '@/lib/employer-constants';
+import {
+  checkRateLimit,
+  rateLimitResponse,
+} from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 
@@ -19,8 +23,22 @@ export async function PATCH(
         { status: 401 },
       );
 
+    const rl = await checkRateLimit(
+      'submissionStatus',
+      `customer:${customer.id}`,
+    );
+    if (!rl.allowed) {
+      return rateLimitResponse(rl);
+    }
+
     const { id } = await params;
     const subId = Number(id);
+    if (!Number.isFinite(subId)) {
+      return NextResponse.json(
+        { ok: false, error: 'Неверный id' },
+        { status: 400 },
+      );
+    }
 
     const [row] = await db
       .select({
@@ -31,11 +49,12 @@ export async function PATCH(
       .innerJoin(quests, eq(quests.id, submissions.questId))
       .where(eq(submissions.id, subId));
 
-    if (!row || row.questCustomerId !== customer.id)
+    if (!row || row.questCustomerId !== customer.id) {
       return NextResponse.json(
         { ok: false, error: 'Сдача не найдена' },
         { status: 404 },
       );
+    }
 
     const body = (await req.json()) as {
       employerStatus?: string | null;
@@ -48,11 +67,12 @@ export async function PATCH(
     if (body.employerStatus === null) {
       statusValue = null;
     } else if (typeof body.employerStatus === 'string') {
-      if (!allowed.has(body.employerStatus as never))
+      if (!allowed.has(body.employerStatus as never)) {
         return NextResponse.json(
           { ok: false, error: 'Неизвестный статус' },
           { status: 400 },
         );
+      }
       statusValue = body.employerStatus;
     }
 

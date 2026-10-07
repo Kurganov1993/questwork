@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { heroes, sessions } from '@/db/schema';
+import { withRetry } from './db-retry';
 
 const scryptAsync = promisify(scrypt);
 
@@ -38,7 +39,10 @@ export async function createSession(heroId: number): Promise<string> {
   const id = randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
 
-  await db.insert(sessions).values({ id, heroId, expiresAt });
+  await withRetry(
+    () => db.insert(sessions).values({ id, heroId, expiresAt }),
+    { label: 'auth:create-session' },
+  );
 
   const jar = await cookies();
   jar.set(SESSION_COOKIE, id, {
@@ -56,7 +60,10 @@ export async function destroyCurrentSession(): Promise<void> {
   const jar = await cookies();
   const id = jar.get(SESSION_COOKIE)?.value;
   if (id) {
-    await db.delete(sessions).where(eq(sessions.id, id)).catch(() => {});
+    await withRetry(
+      () => db.delete(sessions).where(eq(sessions.id, id)),
+      { label: 'auth:destroy-session' },
+    ).catch(() => {});
   }
   jar.delete(SESSION_COOKIE);
 }
@@ -81,21 +88,38 @@ export async function getCurrentHero(): Promise<CurrentHero | null> {
   const sessionId = jar.get(SESSION_COOKIE)?.value;
   if (!sessionId) return null;
 
-  const rows = await db
-    .select({
-      hero: heroes,
-      session: sessions,
-    })
-    .from(sessions)
-    .innerJoin(heroes, eq(heroes.id, sessions.heroId))
-    .where(eq(sessions.id, sessionId))
-    .limit(1);
+  let rows: {
+    hero: typeof heroes.$inferSelect;
+    session: typeof sessions.$inferSelect;
+  }[];
+
+  try {
+    rows = await withRetry(
+      () =>
+        db
+          .select({
+            hero: heroes,
+            session: sessions,
+          })
+          .from(sessions)
+          .innerJoin(heroes, eq(heroes.id, sessions.heroId))
+          .where(eq(sessions.id, sessionId))
+          .limit(1),
+      { label: 'auth:get-current-hero' },
+    );
+  } catch (e) {
+    console.error('[auth] getCurrentHero failed:', (e as Error).message);
+    return null;
+  }
 
   const row = rows[0];
   if (!row) return null;
 
   if (row.session.expiresAt.getTime() < Date.now()) {
-    await db.delete(sessions).where(eq(sessions.id, sessionId)).catch(() => {});
+    await withRetry(
+      () => db.delete(sessions).where(eq(sessions.id, sessionId)),
+      { label: 'auth:delete-expired' },
+    ).catch(() => {});
     return null;
   }
 

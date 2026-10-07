@@ -43,6 +43,8 @@ export async function exchangeCodeForToken(
     access_token?: string;
     error?: string;
     error_description?: string;
+    scope?: string;
+    token_type?: string;
   };
 
   if (data.error || !data.access_token) {
@@ -109,6 +111,11 @@ export async function fetchUserRepos(token: string): Promise<GithubRepo[]> {
   );
 
   if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    console.error('[github-oauth] fetchUserRepos failed:', {
+      status: res.status,
+      body: body.slice(0, 200),
+    });
     throw new Error(`GitHub repos HTTP ${res.status}`);
   }
 

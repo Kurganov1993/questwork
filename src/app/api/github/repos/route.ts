@@ -4,6 +4,7 @@ import { db } from '@/db';
 import { githubAccounts } from '@/db/schema';
 import { getCurrentHero } from '@/lib/auth';
 import { fetchUserRepos } from '@/lib/github-oauth';
+import { decryptToken } from '@/lib/crypto';
 import { withRetry } from '@/lib/db-retry';
 
 export const runtime = 'nodejs';
@@ -44,15 +45,30 @@ export async function GET() {
       );
     }
 
-    const repos = await fetchUserRepos(account.accessToken);
+    const accessToken = decryptToken(account.accessToken);
+
+    // Защита: если токен повреждён — не пробуем стучаться в GitHub
+    if (
+      !accessToken.startsWith('gho_') &&
+      !accessToken.startsWith('ghu_') &&
+      !accessToken.startsWith('ghs_')
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Токен повреждён. Отключи GitHub и подключи заново.',
+        },
+        { status: 500 },
+      );
+    }
+
+    const repos = await fetchUserRepos(accessToken);
 
     return NextResponse.json({ ok: true, repos });
   } catch (e) {
     const err = e as Error & { cause?: unknown };
     const cause = err.cause as Error | undefined;
-    const detail = cause
-      ? `${err.message}: ${cause.message}`
-      : err.message;
+    const detail = cause ? `${err.message}: ${cause.message}` : err.message;
 
     console.error('[github/repos]', detail);
 

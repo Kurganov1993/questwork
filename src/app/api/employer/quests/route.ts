@@ -4,6 +4,10 @@ import { quests, bossPhases, artifacts } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { getCurrentCustomer, slugify } from '@/lib/customer-auth';
 import { CHECK_TYPES } from '@/lib/check-types';
+import {
+  checkRateLimit,
+  rateLimitResponse,
+} from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 
@@ -34,6 +38,14 @@ export async function POST(req: NextRequest) {
         { ok: false, error: 'Нужно войти как работодатель' },
         { status: 401 },
       );
+
+    const rl = await checkRateLimit(
+      'employerCreate',
+      `customer:${customer.id}`,
+    );
+    if (!rl.allowed) {
+      return rateLimitResponse(rl);
+    }
 
     const body = (await req.json()) as Body;
 

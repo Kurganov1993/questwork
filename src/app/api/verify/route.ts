@@ -8,6 +8,14 @@ import { awardQuestArtifacts } from '@/lib/loot';
 import { checkAndAwardAchievements } from '@/lib/achievements';
 import { withRetry } from '@/lib/db-retry';
 import { slimReport } from '@/lib/verify-report';
+import { checkRateLimit } from '@/lib/rate-limit';
+import {
+  acquireBuildSlot,
+  getQueuePosition,
+  getBuildQueueStats,
+} from '@/lib/build-lock';
+import { reportError } from '@/lib/error-reporting';
+import { logger } from '@/lib/logger';
 import type { VerifyReport } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -25,12 +33,61 @@ export async function POST(req: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
+      const hero = await getCurrentHero().catch(() => null);
+      let releaseSlot: () => void = () => {};
+
       try {
-        const hero = await getCurrentHero();
         if (!hero) {
           send(controller, {
             type: 'error',
             message: 'Нужно войти в аккаунт героя',
+          });
+          controller.close();
+          return;
+        }
+
+        const rl = await checkRateLimit('verify', `hero:${hero.id}`);
+        if (!rl.allowed) {
+          send(controller, {
+            type: 'error',
+            message: `Слишком много проверок. Попробуй через ${Math.ceil(
+              rl.resetInSec / 60,
+            )} мин.`,
+          });
+          controller.close();
+          return;
+        }
+
+        // === Слот сборки ===
+        const queuePos = getQueuePosition();
+        if (queuePos > 0) {
+          send(controller, {
+            type: 'queued',
+            position: queuePos + 1,
+            message: `Ты в очереди: позиция ${queuePos + 1}. Ждём освобождения сборки.`,
+          });
+        }
+
+        try {
+          const slot = await acquireBuildSlot();
+          releaseSlot = slot.release;
+
+          if (slot.queuePosition > 0) {
+            logger.info('verify.queue.done', {
+              heroId: hero.id,
+              waitMs: slot.waitMs,
+              position: slot.queuePosition,
+            });
+
+            send(controller, {
+              type: 'queue_done',
+              waitMs: slot.waitMs,
+            });
+          }
+        } catch (e) {
+          send(controller, {
+            type: 'error',
+            message: (e as Error).message,
           });
           controller.close();
           return;
@@ -78,9 +135,10 @@ export async function POST(req: NextRequest) {
           { label: 'verify:get-phases' },
         );
 
-        console.log('[api/verify] hero:', {
-          id: hero.id,
-          nickname: hero.nickname,
+        logger.info('verify.start', {
+          heroId: hero.id,
+          questSlug: quest.slug,
+          queueStats: getBuildQueueStats(),
         });
 
         send(controller, {
@@ -111,7 +169,8 @@ export async function POST(req: NextRequest) {
           },
         );
 
-        console.log('[api/verify] result:', {
+        logger.info('verify.result', {
+          heroId: hero.id,
           totalDamage: report.totalDamage,
           bossMaxHp: report.bossMaxHp,
           victory: report.victory,
@@ -143,17 +202,18 @@ export async function POST(req: NextRequest) {
               submission.id,
             );
           } catch (e) {
-            console.error('[api/verify] reward block failed (non-fatal):', e);
+            await reportError(e, {
+              tags: { route: 'verify', step: 'grantRewards' },
+              user: { id: hero.id, nickname: hero.nickname },
+            });
           }
         }
 
         try {
           const perfect = report.totalDamage === report.bossMaxHp;
-
           const staticPhase = report.phases.find(
             (p) => p.name === 'Статический анализ',
           );
-
           const cleanEslint =
             !!staticPhase &&
             staticPhase.passed &&
@@ -179,7 +239,10 @@ export async function POST(req: NextRequest) {
             );
           }
         } catch (e) {
-          console.error('[api/verify] achievements failed (non-fatal):', e);
+          await reportError(e, {
+            tags: { route: 'verify', step: 'achievements' },
+            user: { id: hero.id, nickname: hero.nickname },
+          });
         }
 
         send(controller, {
@@ -190,7 +253,10 @@ export async function POST(req: NextRequest) {
 
         controller.close();
       } catch (e) {
-        console.error('[api/verify] error:', e);
+        await reportError(e, {
+          tags: { route: 'api/verify' },
+          user: hero ? { id: hero.id, nickname: hero.nickname } : undefined,
+        });
         try {
           send(controller, {
             type: 'error',
@@ -200,6 +266,8 @@ export async function POST(req: NextRequest) {
           /* controller может быть уже закрыт */
         }
         controller.close();
+      } finally {
+        releaseSlot();
       }
     },
   });

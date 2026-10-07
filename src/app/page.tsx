@@ -392,38 +392,70 @@ export default async function HomePage() {
 
       {/* ==================== FOOTER ==================== */}
       <footer className="border-t border-white/5 py-10 mt-8">
-        <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-md bg-amber-500/20 border border-amber-500/40 grid place-items-center text-amber-400 font-bold">
-              Q
-            </div>
-            <div>
-              <div className="text-sm font-semibold tracking-wide">
-                QUESTWORK
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-md bg-amber-500/20 border border-amber-500/40 grid place-items-center text-amber-400 font-bold">
+                Q
               </div>
-              <div className="text-xs text-zinc-600">
-                найм как рейд · прототип
+              <div>
+                <div className="text-sm font-semibold tracking-wide">
+                  QUESTWORK
+                </div>
+                <div className="text-xs text-zinc-600">
+                  найм как рейд · бета-версия
+                </div>
               </div>
             </div>
+
+            <nav className="flex flex-wrap gap-6 text-sm text-zinc-500">
+              <Link href="/quests" className="hover:text-amber-400 transition">
+                Квесты
+              </Link>
+              <Link
+                href="/leaderboard"
+                className="hover:text-amber-400 transition"
+              >
+                Лидерборд
+              </Link>
+              <Link
+                href="/employer"
+                className="hover:text-amber-400 transition"
+              >
+                Работодателям
+              </Link>
+              <Link href="/register" className="hover:text-amber-400 transition">
+                Создать героя
+              </Link>
+            </nav>
           </div>
 
-          <nav className="flex flex-wrap gap-6 text-sm text-zinc-500">
-            <Link href="/quests" className="hover:text-amber-400 transition">
-              Квесты
-            </Link>
+          <div className="w-full mt-6 pt-6 border-t border-white/5 flex flex-wrap gap-4 justify-center text-xs text-zinc-600">
             <Link
-              href="/leaderboard"
+              href="/legal/privacy"
               className="hover:text-amber-400 transition"
             >
-              Лидерборд
+              Конфиденциальность
             </Link>
-            <Link href="/employer" className="hover:text-amber-400 transition">
-              Работодателям
+            <span className="text-zinc-700">·</span>
+            <Link
+              href="/legal/terms"
+              className="hover:text-amber-400 transition"
+            >
+              Пользовательское соглашение
             </Link>
-            <Link href="/register" className="hover:text-amber-400 transition">
-              Создать героя
+            <span className="text-zinc-700">·</span>
+            <Link
+              href="/legal/cookies"
+              className="hover:text-amber-400 transition"
+            >
+              Cookie
             </Link>
-          </nav>
+          </div>
+
+          <div className="mt-4 text-center text-xs text-zinc-700">
+            © {new Date().getFullYear()} QuestWork. Все права защищены.
+          </div>
         </div>
       </footer>
 

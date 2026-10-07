@@ -45,6 +45,8 @@ export function VerifyClient({
   const [report, setReport] = useState<VerifyReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [queuePosition, setQueuePosition] = useState<number | null>(null);
+  const [queueWaitMs, setQueueWaitMs] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // Таймер во время проверки
@@ -74,6 +76,8 @@ export function VerifyClient({
     setLivePhases([]);
     setLiveDamage(0);
     setLiveMaxHp(bossMaxHp);
+    setQueuePosition(null);
+    setQueueWaitMs(null);
     setLoading(true);
 
     const controller = new AbortController();
@@ -120,7 +124,12 @@ export function VerifyClient({
             continue;
           }
 
-          if (msg.type === 'start') {
+          if (msg.type === 'queued') {
+            setQueuePosition(Number(msg.position ?? 1));
+          } else if (msg.type === 'queue_done') {
+            setQueuePosition(null);
+            setQueueWaitMs(Number(msg.waitMs ?? 0));
+          } else if (msg.type === 'start') {
             setLiveMaxHp(Number(msg.bossMaxHp ?? bossMaxHp));
           } else if (msg.type === 'phase') {
             const phase: LivePhase = {
@@ -206,8 +215,44 @@ export function VerifyClient({
         </div>
       </div>
 
+      {/* ==================== ОЧЕРЕДЬ ==================== */}
+      {loading && queuePosition !== null && (
+        <div className="mt-6 glass rounded-2xl p-5 border-l-2 border-l-amber-500/60 relative overflow-hidden">
+          <div className="absolute -top-20 -right-20 w-56 h-56 rounded-full bg-amber-500/10 blur-[80px]" />
+          <div className="relative flex items-center gap-4">
+            <span className="text-3xl animate-pulse">⏳</span>
+            <div className="flex-1">
+              <div className="font-semibold mb-1">
+                Ты в очереди на сборку
+              </div>
+              <div className="text-xs text-zinc-500">
+                Позиция {queuePosition}. Сейчас идёт другая проверка —
+                это займёт 2–4 минуты. Ты автоматически продолжишь,
+                ничего нажимать не нужно.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== ИНФО О ЖДЕНИИ ==================== */}
+      {loading && queuePosition === null && queueWaitMs !== null && queueWaitMs > 5000 && (
+        <div className="mt-6 glass rounded-2xl p-4 border-l-2 border-l-emerald-500/60">
+          <div className="flex items-center gap-3 text-sm">
+            <span className="text-lg">✓</span>
+            <span className="text-zinc-400">
+              Дождался слота сборки за{' '}
+              <span className="text-zinc-200 font-medium">
+                {Math.round(queueWaitMs / 1000)} сек
+              </span>
+              . Начинаем проверку.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* ==================== ПРОГРЕСС ==================== */}
-      {loading && (
+      {loading && livePhases.length >= 0 && (
         <div className="mt-6 glass rounded-2xl p-6">
           <div className="flex items-center justify-between text-xs text-zinc-500 mb-4">
             <span className="font-mono">
@@ -217,7 +262,6 @@ export function VerifyClient({
             <span className="font-mono text-amber-400">{elapsed}s</span>
           </div>
 
-          {/* Прогресс-бар всех фаз */}
           <div className="h-1.5 rounded-full bg-white/5 overflow-hidden mb-5">
             <div
               className="h-full bg-gradient-to-r from-amber-500/60 to-amber-400 rounded-full transition-all duration-500"

@@ -246,6 +246,24 @@ export const githubAccounts = pgTable('github_accounts', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
+export const rateLimits = pgTable(
+  'rate_limits',
+  {
+    id: serial('id').primaryKey(),
+    bucket: varchar('bucket', { length: 128 }).notNull(),
+    key: varchar('key', { length: 128 }).notNull(),
+    count: integer('count').notNull().default(1),
+    windowStart: timestamp('window_start').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqBucketKey: uniqueIndex('rate_limits_bucket_key_unique').on(
+      t.bucket,
+      t.key,
+    ),
+  }),
+);
+
 // ============================================================
 // Типы
 // ============================================================

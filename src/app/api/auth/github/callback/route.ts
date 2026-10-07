@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { githubAccounts } from '@/db/schema';
 import { getCurrentHero } from '@/lib/auth';
@@ -9,6 +8,7 @@ import {
   fetchGithubUser,
   isGithubOAuthConfigured,
 } from '@/lib/github-oauth';
+import { encryptToken } from '@/lib/crypto';
 import { withRetry } from '@/lib/db-retry';
 
 export const runtime = 'nodejs';
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Проверяем state
+  // Проверяем CSRF-токен
   const jar = await cookies();
   const savedState = jar.get(STATE_COOKIE)?.value;
   jar.delete(STATE_COOKIE);
@@ -64,6 +64,9 @@ export async function GET(req: NextRequest) {
     const accessToken = await exchangeCodeForToken(code, redirectUri);
     const ghUser = await fetchGithubUser(accessToken);
 
+    // Шифруем токен перед сохранением
+    const encryptedToken = encryptToken(accessToken);
+
     await withRetry(
       () =>
         db
@@ -72,7 +75,7 @@ export async function GET(req: NextRequest) {
             heroId: hero.id,
             githubId: String(ghUser.id),
             githubUsername: ghUser.login,
-            accessToken,
+            accessToken: encryptedToken,
             avatarUrl: ghUser.avatar_url,
           })
           .onConflictDoUpdate({
@@ -80,14 +83,16 @@ export async function GET(req: NextRequest) {
             set: {
               githubId: String(ghUser.id),
               githubUsername: ghUser.login,
-              accessToken,
+              accessToken: encryptedToken,
               avatarUrl: ghUser.avatar_url,
             },
           }),
       { label: 'github:save-account' },
     );
 
-    return NextResponse.redirect(new URL('/hero/github?connected=1', req.url));
+    return NextResponse.redirect(
+      new URL('/hero/github?connected=1', req.url),
+    );
   } catch (e) {
     console.error('[github/callback]', e);
     const msg = encodeURIComponent((e as Error).message.slice(0, 100));
