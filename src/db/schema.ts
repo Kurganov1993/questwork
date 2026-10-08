@@ -45,6 +45,12 @@ export const questStatusEnum = pgEnum('quest_status', [
   'archived',
 ]);
 
+export const cataDifficultyEnum = pgEnum('cata_difficulty', [
+  'easy',
+  'medium',
+  'hard',
+]);
+
 // ============================================================
 // Герои
 // ============================================================
@@ -57,6 +63,7 @@ export const heroes = pgTable('heroes', {
   level: integer('level').notNull().default(1),
   xp: integer('xp').notNull().default(0),
   gold: integer('gold').notNull().default(0),
+  termsAcceptedAt: timestamp('terms_accepted_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
@@ -76,7 +83,7 @@ export const sessions = pgTable(
 );
 
 // ============================================================
-// Работодатели (компании-заказчики)
+// Работодатели
 // ============================================================
 
 export const customers = pgTable('customers', {
@@ -85,6 +92,7 @@ export const customers = pgTable('customers', {
   passwordHash: varchar('password_hash', { length: 255 }).notNull(),
   companyName: varchar('company_name', { length: 128 }).notNull(),
   slug: varchar('slug', { length: 64 }).notNull().unique(),
+  termsAcceptedAt: timestamp('terms_accepted_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
@@ -162,7 +170,7 @@ export const submissions = pgTable('submissions', {
 });
 
 // ============================================================
-// Артефакты (лут)
+// Артефакты
 // ============================================================
 
 export const artifacts = pgTable('artifacts', {
@@ -233,6 +241,10 @@ export const heroAchievements = pgTable(
   }),
 );
 
+// ============================================================
+// GitHub OAuth
+// ============================================================
+
 export const githubAccounts = pgTable('github_accounts', {
   id: serial('id').primaryKey(),
   heroId: integer('hero_id')
@@ -245,6 +257,10 @@ export const githubAccounts = pgTable('github_accounts', {
   avatarUrl: varchar('avatar_url', { length: 512 }),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
+
+// ============================================================
+// Rate limits
+// ============================================================
 
 export const rateLimits = pgTable(
   'rate_limits',
@@ -265,8 +281,46 @@ export const rateLimits = pgTable(
 );
 
 // ============================================================
+// Каты
+// ============================================================
+
+export const catas = pgTable('catas', {
+  id: serial('id').primaryKey(),
+  slug: varchar('slug', { length: 64 }).notNull().unique(),
+  title: varchar('title', { length: 128 }).notNull(),
+  description: text('description').notNull(),
+  difficulty: cataDifficultyEnum('difficulty').notNull().default('easy'),
+  language: varchar('language', { length: 32 }).notNull().default('javascript'),
+  starterCode: text('starter_code').notNull(),
+  testCode: text('test_code').notNull(),
+  hint: text('hint'),
+  xpReward: integer('xp_reward').notNull().default(50),
+  goldReward: integer('gold_reward').notNull().default(5),
+  timeLimitSec: integer('time_limit_sec').notNull().default(10),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export const cataSubmissions = pgTable('cata_submissions', {
+  id: serial('id').primaryKey(),
+  cataId: integer('cata_id')
+    .notNull()
+    .references(() => catas.id, { onDelete: 'cascade' }),
+  heroId: integer('hero_id')
+    .notNull()
+    .references(() => heroes.id, { onDelete: 'cascade' }),
+  code: text('code').notNull(),
+  passed: integer('passed').notNull().default(0),
+  total: integer('total').notNull().default(0),
+  status: varchar('status', { length: 32 }).notNull().default('pending'),
+  output: text('output'),
+  durationMs: integer('duration_ms').notNull().default(0),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+// ============================================================
 // Типы
 // ============================================================
 
 export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';
 export type QuestStatus = 'draft' | 'active' | 'archived';
+export type CataDifficulty = 'easy' | 'medium' | 'hard';

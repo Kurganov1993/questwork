@@ -16,6 +16,7 @@ import { HERO_CLASSES } from '@/lib/constants';
 import { LogoutButton } from '@/components/LogoutButton';
 import { LootCard } from '@/components/LootCard';
 import { AchievementCard } from '@/components/AchievementCard';
+import { DeleteAccountButton } from '@/components/hero/DeleteAccountButton';
 import { awardQuestArtifacts } from '@/lib/loot';
 import { withRetry } from '@/lib/db-retry';
 import { HeroBackground } from '@/components/home/HeroBackground';
@@ -265,14 +266,13 @@ export default async function HeroPage() {
                   className="text-xs text-zinc-500 hover:text-amber-400 transition"
                 >
                   {github ? (
-                    <>
-                      🐙 @{github.username} →
-                    </>
+                    <>🐙 @{github.username} →</>
                   ) : (
                     <>🐙 Подключить GitHub →</>
                   )}
                 </Link>
                 <LogoutButton />
+                <DeleteAccountButton />
               </div>
             </div>
           </div>

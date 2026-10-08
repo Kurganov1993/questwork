@@ -6,6 +6,7 @@ import { getCurrentHero } from '@/lib/auth';
 import { fetchUserRepos } from '@/lib/github-oauth';
 import { decryptToken } from '@/lib/crypto';
 import { withRetry } from '@/lib/db-retry';
+import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 
@@ -17,6 +18,11 @@ export async function GET() {
         { ok: false, error: 'Не авторизован' },
         { status: 401 },
       );
+    }
+
+    const rl = await checkRateLimit('githubRepos', `hero:${hero.id}`);
+    if (!rl.allowed) {
+      return rateLimitResponse(rl);
     }
 
     let account: typeof githubAccounts.$inferSelect | undefined;
@@ -45,8 +51,22 @@ export async function GET() {
       );
     }
 
-    // Расшифровываем токен перед использованием
     const accessToken = decryptToken(account.accessToken);
+
+    if (
+      !accessToken.startsWith('gho_') &&
+      !accessToken.startsWith('ghu_') &&
+      !accessToken.startsWith('ghs_')
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Токен повреждён. Отключи GitHub и подключи заново.',
+        },
+        { status: 500 },
+      );
+    }
+
     const repos = await fetchUserRepos(accessToken);
 
     return NextResponse.json({ ok: true, repos });

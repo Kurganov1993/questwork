@@ -8,6 +8,11 @@ import {
   validateNickname,
   validatePassword,
 } from '@/lib/auth';
+import {
+  checkRateLimit,
+  getClientIdentifier,
+  rateLimitResponse,
+} from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 
@@ -24,18 +29,40 @@ type HeroClass = (typeof HERO_CLASSES)[number];
 
 export async function POST(req: NextRequest) {
   try {
+    const identifier = getClientIdentifier(req);
+    const rl = await checkRateLimit('auth', identifier);
+    if (!rl.allowed) return rateLimitResponse(rl);
+
     const body = await req.json();
     const nicknameRaw = String(body.nickname ?? '').trim();
     const password = String(body.password ?? '');
     const heroClass = body.heroClass as HeroClass;
+    const acceptedTerms = body.acceptedTerms === true;
+
+    if (!acceptedTerms) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'Необходимо принять Пользовательское соглашение и Политику конфиденциальности',
+        },
+        { status: 400 },
+      );
+    }
 
     const nicknameErr = validateNickname(nicknameRaw);
     if (nicknameErr)
-      return NextResponse.json({ ok: false, error: nicknameErr }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: nicknameErr },
+        { status: 400 },
+      );
 
     const passwordErr = validatePassword(password);
     if (passwordErr)
-      return NextResponse.json({ ok: false, error: passwordErr }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: passwordErr },
+        { status: 400 },
+      );
 
     if (!HERO_CLASSES.includes(heroClass))
       return NextResponse.json(
@@ -58,7 +85,12 @@ export async function POST(req: NextRequest) {
 
     const [created] = await db
       .insert(heroes)
-      .values({ nickname: nicknameRaw, passwordHash, heroClass })
+      .values({
+        nickname: nicknameRaw,
+        passwordHash,
+        heroClass,
+        termsAcceptedAt: new Date(),
+      })
       .returning();
 
     await createSession(created.id);

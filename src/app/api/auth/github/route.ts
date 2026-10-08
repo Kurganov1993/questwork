@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { cookies } from 'next/headers';
 import { getCurrentHero } from '@/lib/auth';
 import { getAuthorizeUrl, isGithubOAuthConfigured } from '@/lib/github-oauth';
+import { checkRateLimit } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 
@@ -12,6 +13,18 @@ export async function GET(req: NextRequest) {
   const hero = await getCurrentHero();
   if (!hero) {
     return NextResponse.redirect(new URL('/login', req.url));
+  }
+
+  const rl = await checkRateLimit('githubOAuth', `hero:${hero.id}`);
+  if (!rl.allowed) {
+    return NextResponse.redirect(
+      new URL(
+        `/hero/github?error=${encodeURIComponent(
+          'Слишком много попыток. Попробуй позже.',
+        )}`,
+        req.url,
+      ),
+    );
   }
 
   if (!isGithubOAuthConfigured()) {
@@ -27,7 +40,7 @@ export async function GET(req: NextRequest) {
     httpOnly: true,
     sameSite: 'lax',
     path: '/',
-    maxAge: 600, // 10 минут
+    maxAge: 600,
     secure: process.env.NODE_ENV === 'production',
   });
 

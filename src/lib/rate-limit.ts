@@ -22,6 +22,10 @@ const PRESETS: Record<string, RateLimitConfig> = {
   employerCreate: { bucket: 'employer-create', limit: 30, windowSec: 3600 },
   submissionStatus: { bucket: 'submission-status', limit: 100, windowSec: 3600 },
   cataRun: { bucket: 'cata-run', limit: 60, windowSec: 3600 },
+  githubOAuth: { bucket: 'github-oauth', limit: 10, windowSec: 3600 },
+  githubRepos: { bucket: 'github-repos', limit: 60, windowSec: 3600 },
+  notifications: { bucket: 'notifications', limit: 120, windowSec: 3600 },
+  accountDelete: { bucket: 'account-delete', limit: 3, windowSec: 3600 },
 };
 
 let lastCleanup = 0;
@@ -41,10 +45,6 @@ async function maybeCleanup() {
   }
 }
 
-/**
- * Fixed-window rate limiter на Postgres.
- * Атомарный UPSERT: если окно истекло — сбрасываем, иначе инкрементим.
- */
 export async function checkRateLimit(
   configKey: keyof typeof PRESETS,
   identifier: string,
@@ -132,7 +132,6 @@ export async function checkRateLimit(
       limit,
     };
   } catch (e) {
-    // Fail open: при сбое БД пропускаем запрос
     console.error('[rate-limit] check failed:', (e as Error).message);
     return {
       allowed: true,
@@ -143,9 +142,6 @@ export async function checkRateLimit(
   }
 }
 
-/**
- * Извлекает идентификатор клиента: id героя если авторизован, иначе IP.
- */
 export function getClientIdentifier(
   req: Request,
   heroId?: number,
@@ -164,9 +160,6 @@ export function getClientIdentifier(
   return 'ip:unknown';
 }
 
-/**
- * Response с 429 при исчерпанном лимите.
- */
 export function rateLimitResponse(result: RateLimitResult) {
   return new Response(
     JSON.stringify({
