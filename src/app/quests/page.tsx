@@ -7,6 +7,7 @@ import { withRetry } from '@/lib/db-retry';
 import { QuestCard } from '@/components/home/QuestCard';
 import { TiltCard } from '@/components/animations/TiltCard';
 import { HeroBackground } from '@/components/home/HeroBackground';
+import { pluralWord } from '@/lib/plural';
 
 export const dynamic = 'force-dynamic';
 
@@ -149,10 +150,16 @@ export default async function QuestsPage({
 
           <div className="mt-6 flex items-end justify-between gap-6 flex-wrap">
             <div>
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full glass text-xs text-amber-300 mb-4">
+                            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full glass text-xs text-amber-300 mb-4">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-dot" />
                 <span className="tracking-widest font-mono">
-                  {totalQuests} КВЕСТОВ ОТКРЫТО
+                  {totalQuests}{' '}
+                  {pluralWord(totalQuests, [
+                    'КВЕСТ',
+                    'КВЕСТА',
+                    'КВЕСТОВ',
+                  ])}{' '}
+                  ОТКРЫТО
                 </span>
               </div>
               <h1 className="text-4xl sm:text-5xl font-bold mb-3">

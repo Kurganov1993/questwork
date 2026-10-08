@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Inter, Space_Grotesk } from 'next/font/google';
 import './globals.css';
 import { getCurrentHero } from '@/lib/auth';
 import { countUnseenNotifications } from '@/lib/notifications';
@@ -8,20 +8,29 @@ import { HeaderNav } from '@/components/layout/HeaderNav';
 import { BetaBanner } from '@/components/legal/BetaBanner';
 import { CookieBanner } from '@/components/legal/CookieBanner';
 import { AnalyticsTracker } from '@/components/analytics/AnalyticsTracker';
+import { PLATFORM } from '@/lib/platform';
 
-const inter = Inter({ subsets: ['latin', 'cyrillic'] });
+const inter = Inter({
+  subsets: ['latin', 'cyrillic'],
+  variable: '--font-body',
+  display: 'swap',
+});
+
+const grotesk = Space_Grotesk({
+  subsets: ['latin'],
+  variable: '--font-display',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
-  title: 'QuestWork — найм как рейд',
-  description:
-    'Прокачивай героя, проходи квесты, побеждай боссов. Проверка кода через Docker, ESLint и AI.',
+  title: `${PLATFORM.name} — ${PLATFORM.tagline}`,
+  description: PLATFORM.description,
   metadataBase: new URL(
-    process.env.NEXT_PUBLIC_APP_URL ?? 'https://questwork.app',
+    process.env.NEXT_PUBLIC_APP_URL ?? `https://${PLATFORM.domain}`,
   ),
   openGraph: {
-    title: 'QuestWork — найм как рейд',
-    description:
-      'Сдай GitHub-репозиторий — платформа соберёт его в Docker, прогонит тесты и AI-ревью.',
+    title: `${PLATFORM.name} — ${PLATFORM.tagline}`,
+    description: PLATFORM.description,
     type: 'website',
   },
 };
@@ -35,7 +44,7 @@ export default async function RootLayout({
   const unseen = hero ? await countUnseenNotifications(hero.id) : 0;
 
   return (
-    <html lang="ru" className="dark">
+    <html lang="ru" className={`dark ${inter.variable} ${grotesk.variable}`}>
       <body
         className={`${inter.className} bg-zinc-950 text-zinc-100 antialiased`}
       >

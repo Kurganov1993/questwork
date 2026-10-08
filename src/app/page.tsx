@@ -1,14 +1,15 @@
 import Link from 'next/link';
-import { eq, desc, and, sql } from 'drizzle-orm';
+import { redirect } from 'next/navigation';
+import { eq, desc, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { quests, heroes, submissions, customers } from '@/db/schema';
 import { withRetry } from '@/lib/db-retry';
 import { getCurrentHero } from '@/lib/auth';
+import { pluralWord, pluralize } from '@/lib/plural';
+import { PLATFORM } from '@/lib/platform';
 import { HeroBackground } from '@/components/home/HeroBackground';
 import { AnimatedNumber } from '@/components/home/AnimatedNumber';
 import { VictoryTicker } from '@/components/home/VictoryTicker';
-import { QuestCard } from '@/components/home/QuestCard';
-import { HeroPodium } from '@/components/home/HeroPodium';
 import { HomeAnimations } from '@/components/animations/HomeAnimations';
 import { SplitHeroTitle } from '@/components/animations/SplitHeroTitle';
 import { MagneticButton } from '@/components/animations/MagneticButton';
@@ -19,84 +20,40 @@ export const dynamic = 'force-dynamic';
 export default async function HomePage() {
   const currentHero = await getCurrentHero();
 
-  const [topQuests, stats, topHeroes, recentVictories, clearedQuestIds] =
-    await Promise.all([
-      withRetry(
-        () =>
-          db
-            .select()
-            .from(quests)
-            .where(eq(quests.status, 'active'))
-            .orderBy(quests.difficulty)
-            .limit(3),
-        { label: 'home:quests' },
-      ).catch(() => []),
+  // Если залогинен — сразу на рабочий стол
+  if (currentHero) {
+    redirect('/dashboard');
+  }
 
-      loadStats(),
-
-      withRetry(
-        () =>
-          db
-            .select({
-              id: heroes.id,
-              nickname: heroes.nickname,
-              heroClass: heroes.heroClass,
-              level: heroes.level,
-              xp: heroes.xp,
-              gold: heroes.gold,
-            })
-            .from(heroes)
-            .orderBy(desc(heroes.xp), desc(heroes.level))
-            .limit(3),
-        { label: 'home:heroes' },
-      ).catch(() => []),
-
-      withRetry(
-        () =>
-          db
-            .select({
-              id: submissions.id,
-              damageDealt: submissions.damageDealt,
-              heroNickname: heroes.nickname,
-              heroClass: heroes.heroClass,
-              questTitle: quests.title,
-              questIcon: quests.icon,
-              questSlug: quests.slug,
-              bossMaxHp: quests.bossMaxHp,
-              bossName: quests.bossName,
-            })
-            .from(submissions)
-            .innerJoin(heroes, eq(heroes.id, submissions.heroId))
-            .innerJoin(quests, eq(quests.id, submissions.questId))
-            .where(eq(submissions.status, 'victory'))
-            .orderBy(desc(submissions.createdAt))
-            .limit(8),
-        { label: 'home:victories' },
-      ).catch(() => []),
-
-      currentHero
-        ? withRetry(
-            () =>
-              db
-                .select({ questId: submissions.questId })
-                .from(submissions)
-                .where(
-                  and(
-                    eq(submissions.heroId, currentHero.id),
-                    eq(submissions.status, 'victory'),
-                  ),
-                )
-                .groupBy(submissions.questId),
-            { label: 'home:cleared' },
-          ).catch(() => [])
-        : Promise.resolve([]),
-    ]);
-
-  const clearedSet = new Set(clearedQuestIds.map((c) => c.questId));
+  const [stats, recentVictories] = await Promise.all([
+    loadStats(),
+    withRetry(
+      () =>
+        db
+          .select({
+            id: submissions.id,
+            damageDealt: submissions.damageDealt,
+            heroNickname: heroes.nickname,
+            heroClass: heroes.heroClass,
+            questTitle: quests.title,
+            questIcon: quests.icon,
+            questSlug: quests.slug,
+            bossMaxHp: quests.bossMaxHp,
+            bossName: quests.bossName,
+          })
+          .from(submissions)
+          .innerJoin(heroes, eq(heroes.id, submissions.heroId))
+          .innerJoin(quests, eq(quests.id, submissions.questId))
+          .where(eq(submissions.status, 'victory'))
+          .orderBy(desc(submissions.createdAt))
+          .limit(8),
+      { label: 'home:victories' },
+    ).catch(() => []),
+  ]);
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      {/* HERO */}
+      {/* ==================== HERO ==================== */}
       <section className="relative overflow-hidden">
         <HeroBackground />
 
@@ -108,7 +65,11 @@ export default async function HomePage() {
               <span className="text-zinc-600">·</span>
               <span className="text-zinc-400">
                 {stats.totalVictories > 0
-                  ? `${stats.totalVictories} побед на платформе`
+                  ? `${pluralize(stats.totalVictories, [
+                      'победа',
+                      'победы',
+                      'побед',
+                    ])} на платформе`
                   : 'первый сезон'}
               </span>
             </div>
@@ -131,19 +92,19 @@ export default async function HomePage() {
           >
             <MagneticButton>
               <Link
-                href="/quests"
+                href="/register"
                 className="block px-7 py-3.5 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition shadow-[0_0_40px_-10px_rgba(251,191,36,0.6)] hover:shadow-[0_0_60px_-10px_rgba(251,191,36,0.8)]"
               >
-                К доске квестов
+                Создать героя
               </Link>
             </MagneticButton>
 
             <MagneticButton>
               <Link
-                href={currentHero ? '/hero' : '/register'}
+                href="/quests"
                 className="block px-7 py-3.5 rounded-lg glass hover:bg-white/5 font-semibold transition"
               >
-                {currentHero ? 'Мой профиль' : 'Создать героя'}
+                Посмотреть квесты
               </Link>
             </MagneticButton>
           </div>
@@ -153,21 +114,33 @@ export default async function HomePage() {
               data-reveal
               className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-3xl mx-auto mt-16"
             >
-              <Stat label="героев" value={stats.totalHeroes} icon="🧙" />
-              <Stat label="квестов" value={stats.activeQuests} icon="📜" />
               <Stat
-                label="побед"
+                value={stats.totalHeroes}
+                icon="🧙"
+                forms={['герой', 'героя', 'героев']}
+              />
+              <Stat
+                value={stats.activeQuests}
+                icon="📜"
+                forms={['квест', 'квеста', 'квестов']}
+              />
+              <Stat
                 value={stats.totalVictories}
                 icon="⚔️"
+                forms={['победа', 'победы', 'побед']}
                 accent
               />
-              <Stat label="компаний" value={stats.totalCustomers} icon="🏢" />
+              <Stat
+                value={stats.totalCustomers}
+                icon="🏢"
+                forms={['компания', 'компании', 'компаний']}
+              />
             </div>
           )}
         </div>
       </section>
 
-      {/* ЖИВАЯ ЛЕНТА */}
+      {/* ==================== ЖИВАЯ ЛЕНТА ==================== */}
       {recentVictories.length > 0 && (
         <VictoryTicker
           victories={recentVictories.map((v) => ({
@@ -184,111 +157,7 @@ export default async function HomePage() {
         />
       )}
 
-      {/* КВЕСТЫ */}
-      <section className="relative max-w-4xl mx-auto px-6 py-20">
-        <div data-reveal>
-          <SectionHeader
-            title="АКТИВНЫЕ КВЕСТЫ"
-            link={{ href: '/quests', label: 'все квесты →' }}
-          />
-        </div>
-
-        {topQuests.length === 0 ? (
-          <div className="glass rounded-2xl p-10 text-center text-zinc-500">
-            Квестов пока нет.{' '}
-            <Link
-              href="/employer/register"
-              className="text-amber-400 hover:text-amber-300"
-            >
-              Создайте первый как работодатель
-            </Link>
-            .
-          </div>
-        ) : (
-          <div className="space-y-4" data-cascade>
-            {topQuests.map((q) => (
-              <div key={q.id} data-cascade-item>
-                <TiltCard max={3}>
-                  <QuestCard quest={q} cleared={clearedSet.has(q.id)} />
-                </TiltCard>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* ЗАЛ СЛАВЫ */}
-      {topHeroes.length > 0 && (
-        <section className="relative max-w-5xl mx-auto px-6 py-16">
-          <div data-reveal>
-            <SectionHeader
-              title="ЗАЛ СЛАВЫ"
-              link={{ href: '/leaderboard', label: 'весь лидерборд →' }}
-              centered
-            />
-          </div>
-
-          <div data-podium>
-            <HeroPodium heroes={topHeroes} />
-          </div>
-
-          <div className="mt-8 text-center" data-reveal>
-            <Link
-              href="/leaderboard"
-              className="text-xs text-zinc-500 hover:text-amber-400 transition"
-            >
-              смотреть полный рейтинг героев
-            </Link>
-          </div>
-        </section>
-      )}
-
-      {/* КОМУ ЭТО */}
-      <section className="relative max-w-6xl mx-auto px-6 py-20">
-        <div data-reveal>
-          <SectionHeader title="КОМУ ЭТО НУЖНО" centered />
-        </div>
-
-        <div className="grid md:grid-cols-2 gap-5" data-cascade>
-          <div data-cascade-item>
-            <TiltCard max={4}>
-              <AudienceCard
-                icon="🧙"
-                title="Разработчикам"
-                subtitle="Хватит отправлять резюме в пустоту"
-                bullets={[
-                  'Docker реально собирает твой проект',
-                  'ESLint + Semgrep находят баги и уязвимости',
-                  'AI-ревью читает код и объясняет, что улучшить',
-                  'Профиль с артефактами вместо PDF-резюме',
-                ]}
-                cta={{ href: '/register', label: 'Создать героя' }}
-                accent="amber"
-              />
-            </TiltCard>
-          </div>
-
-          <div data-cascade-item>
-            <TiltCard max={4}>
-              <AudienceCard
-                icon="🏢"
-                title="Работодателям"
-                subtitle="Хватит читать «уверенное владение React»"
-                bullets={[
-                  'Публикуй задачи с проверяемыми критериями',
-                  'Автоматическая проверка каждой сдачи',
-                  'Воронка: шортлист → интервью → найм',
-                  'Публичные профили героев без логина',
-                ]}
-                cta={{ href: '/employer/register', label: 'Создать квест' }}
-                accent="violet"
-              />
-            </TiltCard>
-          </div>
-        </div>
-      </section>
-
-      {/* КАК ЭТО РАБОТАЕТ */}
+      {/* ==================== КАК ЭТО РАБОТАЕТ ==================== */}
       <section className="relative max-w-6xl mx-auto px-6 py-20">
         <div data-reveal>
           <SectionHeader title="КАК ЭТО РАБОТАЕТ" centered />
@@ -341,7 +210,52 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* ФИНАЛЬНЫЙ CTA */}
+      {/* ==================== КОМУ ЭТО ==================== */}
+      <section className="relative max-w-6xl mx-auto px-6 py-20">
+        <div data-reveal>
+          <SectionHeader title="КОМУ ЭТО НУЖНО" centered />
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-5" data-cascade>
+          <div data-cascade-item>
+            <TiltCard max={4}>
+              <AudienceCard
+                icon="🧙"
+                title="Разработчикам"
+                subtitle="Хватит отправлять резюме в пустоту"
+                bullets={[
+                  'Docker реально собирает твой проект',
+                  'ESLint + Semgrep находят баги и уязвимости',
+                  'AI-ревью читает код и объясняет, что улучшить',
+                  'Профиль с артефактами вместо PDF-резюме',
+                ]}
+                cta={{ href: '/register', label: 'Создать героя' }}
+                accent="amber"
+              />
+            </TiltCard>
+          </div>
+
+          <div data-cascade-item>
+            <TiltCard max={4}>
+              <AudienceCard
+                icon="🏢"
+                title="Работодателям"
+                subtitle="Хватит читать «уверенное владение React»"
+                bullets={[
+                  'Публикуй задачи с проверяемыми критериями',
+                  'Автоматическая проверка каждой сдачи',
+                  'Воронка: шортлист → интервью → найм',
+                  'Публичные профили героев без логина',
+                ]}
+                cta={{ href: '/employer/register', label: 'Создать квест' }}
+                accent="violet"
+              />
+            </TiltCard>
+          </div>
+        </div>
+      </section>
+
+      {/* ==================== ФИНАЛЬНЫЙ CTA ==================== */}
       <section className="relative max-w-4xl mx-auto px-6 py-20">
         <div
           data-reveal
@@ -369,10 +283,10 @@ export default async function HomePage() {
             <div className="flex gap-4 justify-center flex-wrap">
               <MagneticButton>
                 <Link
-                  href={currentHero ? '/quests' : '/register'}
+                  href="/register"
                   className="block px-7 py-3.5 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition shadow-[0_0_40px_-10px_rgba(251,191,36,0.6)]"
                 >
-                  {currentHero ? 'Выбрать квест' : 'Начать путь героя'}
+                  Начать путь героя
                 </Link>
               </MagneticButton>
 
@@ -389,20 +303,20 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* FOOTER */}
+      {/* ==================== FOOTER ==================== */}
       <footer className="border-t border-white/5 py-10 mt-8">
         <div className="max-w-6xl mx-auto px-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-md bg-amber-500/20 border border-amber-500/40 grid place-items-center text-amber-400 font-bold">
-                Q
+              <div className="w-9 h-9 rounded-md bg-amber-500/20 border border-amber-500/40 grid place-items-center text-amber-400 font-bold font-display text-lg">
+                {PLATFORM.monogram}
               </div>
               <div>
-                <div className="text-sm font-semibold tracking-wide">
-                  QUESTWORK
+                <div className="text-sm font-semibold font-display tracking-[0.15em]">
+                  {PLATFORM.shortName}
                 </div>
                 <div className="text-xs text-zinc-600">
-                  найм как рейд · бета-версия
+                  {PLATFORM.tagline} · бета-версия
                 </div>
               </div>
             </div>
@@ -423,7 +337,10 @@ export default async function HomePage() {
               >
                 Работодателям
               </Link>
-              <Link href="/register" className="hover:text-amber-400 transition">
+              <Link
+                href="/register"
+                className="hover:text-amber-400 transition"
+              >
                 Создать героя
               </Link>
             </nav>
@@ -461,7 +378,7 @@ export default async function HomePage() {
           </div>
 
           <div className="mt-4 text-center text-xs text-zinc-700">
-            © {new Date().getFullYear()} QuestWork. Все права защищены.
+            © {new Date().getFullYear()} {PLATFORM.name}. Все права защищены.
           </div>
         </div>
       </footer>
@@ -471,17 +388,15 @@ export default async function HomePage() {
   );
 }
 
-// ==================== ХЕЛПЕРЫ ====================
-
 function Stat({
-  label,
   value,
   icon,
+  forms,
   accent = false,
 }: {
-  label: string;
   value: number;
   icon: string;
+  forms: [string, string, string];
   accent?: boolean;
 }) {
   return (
@@ -495,7 +410,7 @@ function Stat({
         <AnimatedNumber value={value} />
       </div>
       <div className="text-xs text-zinc-500 mt-0.5 tracking-wide uppercase">
-        {label}
+        {pluralWord(value, forms)}
       </div>
     </div>
   );
@@ -503,11 +418,9 @@ function Stat({
 
 function SectionHeader({
   title,
-  link,
   centered = false,
 }: {
   title: string;
-  link?: { href: string; label: string };
   centered?: boolean;
 }) {
   return (
@@ -523,14 +436,6 @@ function SectionHeader({
         </h2>
         <div className="h-px w-8 bg-gradient-to-l from-transparent to-amber-500/60" />
       </div>
-      {link && (
-        <Link
-          href={link.href}
-          className="text-xs text-amber-400 hover:text-amber-300 transition whitespace-nowrap"
-        >
-          {link.label}
-        </Link>
-      )}
     </div>
   );
 }

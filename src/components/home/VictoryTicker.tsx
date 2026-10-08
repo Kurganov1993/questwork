@@ -21,9 +21,9 @@ export function VictoryTicker({ victories }: { victories: TickerVictory[] }) {
 
   return (
     <div className="relative overflow-hidden py-4 border-y border-zinc-800/60 bg-zinc-950/60">
-      {/* Маска по краям */}
-      <div className="absolute left-0 top-0 bottom-0 w-32 bg-gradient-to-r from-zinc-950 to-transparent z-10 pointer-events-none" />
-      <div className="absolute right-0 top-0 bottom-0 w-32 bg-gradient-to-l from-zinc-950 to-transparent z-10 pointer-events-none" />
+      {/* Маска по краям — мягкая, не выглядит как крестик */}
+      <div className="absolute left-0 top-0 bottom-0 w-20 bg-gradient-to-r from-zinc-950 via-zinc-950/80 to-transparent z-10 pointer-events-none" />
+      <div className="absolute right-0 top-0 bottom-0 w-20 bg-gradient-to-l from-zinc-950 via-zinc-950/80 to-transparent z-10 pointer-events-none" />
 
       <div className="flex gap-8 animate-ticker whitespace-nowrap">
         {items.map((v, idx) => {

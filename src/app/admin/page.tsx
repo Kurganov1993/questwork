@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { desc, gte, sql, eq } from 'drizzle-orm';
+import { pluralize } from '@/lib/plural';
 import { db } from '@/db';
 import {
   heroes,
@@ -311,11 +312,11 @@ export default async function AdminPage() {
               value={custTotal}
               sub={`${custVerified} подтверждено · +${custLast7d} за 7д`}
             />
-            <Metric
+                        <Metric
               icon="⚔️"
               label="Сдач"
               value={subTotal}
-              sub={`${subVictories} побед · ${subDefeats} поражений · ${winRate}% win`}
+              sub={`${pluralize(subVictories, ['победа', 'победы', 'побед'])} · ${pluralize(subDefeats, ['поражение', 'поражения', 'поражений'])} · ${winRate}% win`}
               accent
             />
             <Metric

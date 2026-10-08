@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { HERO_CLASSES } from '@/lib/constants';
+import { PLATFORM } from '@/lib/platform';
 
 type HeroInfo = {
   id: number;
@@ -24,7 +25,6 @@ export function HeaderNav({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
-  // Тень шапки при скролле
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
     onScroll();
@@ -32,7 +32,6 @@ export function HeaderNav({
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // Блокируем прокрутку body при открытом мобильном меню
   useEffect(() => {
     if (!mobileOpen) return;
     const prev = document.body.style.overflow;
@@ -42,12 +41,10 @@ export function HeaderNav({
     };
   }, [mobileOpen]);
 
-  // Закрываем меню при переходе по ссылке
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
 
-  // Esc закрывает меню
   useEffect(() => {
     if (!mobileOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -66,15 +63,15 @@ export function HeaderNav({
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
-  // Админ определяется через публичную env-переменную
   const isAdmin =
     hero !== null &&
     Number(process.env.NEXT_PUBLIC_ADMIN_HERO_ID ?? 0) === hero.id;
 
+  // Меню: для гостя — Квесты и Лидерборд, для залогиненного + Дашборд
   const NAV = [
+    ...(hero ? [{ href: '/dashboard', label: 'Дашборд' }] : []),
     { href: '/quests', label: 'Квесты' },
     { href: '/leaderboard', label: 'Лидерборд' },
-    { href: '/employer', label: 'Работодателям' },
     ...(isAdmin ? [{ href: '/admin', label: 'Админ' }] : []),
   ];
 
@@ -91,14 +88,14 @@ export function HeaderNav({
           {/* Логотип */}
           <Link
             href="/"
-            className="flex items-center gap-3 group shrink-0"
-            aria-label="QuestWork — на главную"
+            className="flex items-center gap-2.5 group shrink-0"
+            aria-label={`${PLATFORM.name} — на главную`}
           >
-            <div className="w-9 h-9 rounded-md bg-amber-500/20 border border-amber-500/40 grid place-items-center text-amber-400 font-bold group-hover:bg-amber-500/30 group-hover:scale-105 transition-all">
-              Q
+            <div className="w-9 h-9 rounded-md bg-amber-500/20 border border-amber-500/40 grid place-items-center text-amber-400 font-bold font-display text-lg group-hover:bg-amber-500/30 group-hover:scale-105 transition-all">
+              {PLATFORM.monogram}
             </div>
-            <span className="font-semibold tracking-wide hidden sm:inline">
-              QUESTWORK
+            <span className="font-semibold font-display tracking-[0.15em] hidden sm:inline text-[15px]">
+              {PLATFORM.shortName}
             </span>
           </Link>
 
@@ -106,6 +103,7 @@ export function HeaderNav({
           <nav className="hidden md:flex items-center gap-5 text-sm flex-1 justify-end">
             {NAV.map((link) => {
               const active = isActive(link.href);
+              const isAdminLink = link.href === '/admin';
               return (
                 <Link
                   key={link.href}
@@ -113,7 +111,7 @@ export function HeaderNav({
                   className={`relative py-1 transition ${
                     active
                       ? 'text-amber-400'
-                      : link.href === '/admin'
+                      : isAdminLink
                       ? 'text-red-400/80 hover:text-red-300'
                       : 'text-zinc-400 hover:text-amber-400'
                   }`}
@@ -135,7 +133,6 @@ export function HeaderNav({
                     title="Приглашения от компаний"
                   >
                     <span>🔔</span>
-                    <span>Приглашения</span>
                     <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-amber-500 text-black text-[10px] font-bold">
                       {unseen}
                     </span>
@@ -144,17 +141,14 @@ export function HeaderNav({
 
                 <Link
                   href="/hero"
-                  className="group flex items-center gap-3 rounded-md border border-zinc-800 hover:border-amber-500/60 hover:bg-white/[0.02] px-3 py-1.5 transition"
+                  className="group flex items-center gap-2.5 rounded-md border border-zinc-800 hover:border-amber-500/60 hover:bg-white/[0.02] px-3 py-1.5 transition"
+                  title={`Уровень ${hero.level} · 🪙 ${hero.gold}`}
                 >
                   <span className="text-lg group-hover:scale-110 transition-transform">
                     {cls?.icon ?? '🧙'}
                   </span>
-                  <span className="text-zinc-300">{hero.nickname}</span>
-                  <span className="text-xs text-amber-400">
-                    ур. {hero.level}
-                  </span>
-                  <span className="text-xs text-zinc-400 hidden lg:inline">
-                    🪙 {hero.gold}
+                  <span className="text-zinc-300 max-w-[120px] truncate">
+                    {hero.nickname}
                   </span>
                 </Link>
               </div>
@@ -241,10 +235,12 @@ export function HeaderNav({
                 className="flex items-center gap-3"
                 onClick={() => setMobileOpen(false)}
               >
-                <div className="w-9 h-9 rounded-md bg-amber-500/20 border border-amber-500/40 grid place-items-center text-amber-400 font-bold">
-                  Q
+                <div className="w-9 h-9 rounded-md bg-amber-500/20 border border-amber-500/40 grid place-items-center text-amber-400 font-bold font-display text-lg">
+                  {PLATFORM.monogram}
                 </div>
-                <span className="font-semibold tracking-wide">QUESTWORK</span>
+                <span className="font-semibold font-display tracking-[0.15em]">
+                  {PLATFORM.shortName}
+                </span>
               </Link>
               <button
                 onClick={() => setMobileOpen(false)}
@@ -283,6 +279,24 @@ export function HeaderNav({
                   </Link>
                 );
               })}
+
+              {/* Дополнительные ссылки для гостей и героев */}
+              <div className="pt-2 mt-2 border-t border-white/5 space-y-2">
+                <Link
+                  href="/employer"
+                  className="flex items-center justify-between px-4 py-3 rounded-xl text-sm text-zinc-400 hover:bg-white/5 transition"
+                >
+                  <span>🏢 Работодателям</span>
+                  <span className="text-zinc-600">→</span>
+                </Link>
+                <Link
+                  href="/about"
+                  className="flex items-center justify-between px-4 py-3 rounded-xl text-sm text-zinc-400 hover:bg-white/5 transition"
+                >
+                  <span>ℹ️ О проекте</span>
+                  <span className="text-zinc-600">→</span>
+                </Link>
+              </div>
 
               {hero && unseen > 0 && (
                 <Link
