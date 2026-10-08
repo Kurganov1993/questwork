@@ -4,10 +4,7 @@ import { quests, bossPhases, artifacts } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { getCurrentCustomer, slugify } from '@/lib/customer-auth';
 import { CHECK_TYPES } from '@/lib/check-types';
-import {
-  checkRateLimit,
-  rateLimitResponse,
-} from '@/lib/rate-limit';
+import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 
@@ -33,11 +30,12 @@ type Body = {
 export async function POST(req: NextRequest) {
   try {
     const customer = await getCurrentCustomer();
-    if (!customer)
+    if (!customer) {
       return NextResponse.json(
         { ok: false, error: 'Нужно войти как работодатель' },
         { status: 401 },
       );
+    }
 
     const rl = await checkRateLimit(
       'employerCreate',
@@ -62,26 +60,30 @@ export async function POST(req: NextRequest) {
     );
     const phases = Array.isArray(body.phases) ? body.phases : [];
 
-    if (title.length < 3)
+    if (title.length < 3) {
       return NextResponse.json(
         { ok: false, error: 'Название минимум 3 символа' },
         { status: 400 },
       );
-    if (description.length < 10)
+    }
+    if (description.length < 10) {
       return NextResponse.json(
         { ok: false, error: 'Описание минимум 10 символов' },
         { status: 400 },
       );
-    if (bossName.length < 2)
+    }
+    if (bossName.length < 2) {
       return NextResponse.json(
         { ok: false, error: 'Имя босса минимум 2 символа' },
         { status: 400 },
       );
-    if (phases.length < 1 || phases.length > 12)
+    }
+    if (phases.length < 1 || phases.length > 12) {
       return NextResponse.json(
         { ok: false, error: 'Фаз должно быть от 1 до 12' },
         { status: 400 },
       );
+    }
 
     const validCheckTypes = new Set(CHECK_TYPES.map((c) => c.value));
     for (const p of phases) {
@@ -107,7 +109,6 @@ export async function POST(req: NextRequest) {
 
     const bossMaxHp = phases.reduce((s, p) => s + Number(p.maxHp), 0);
 
-    // Уникальный slug
     let slug = slugify(title) || 'quest';
     let attempt = 0;
     while (attempt < 10) {
@@ -134,7 +135,7 @@ export async function POST(req: NextRequest) {
         rewardGold,
         victoryThreshold,
         customerId: customer.id,
-        status: 'active',
+        status: 'draft',
       })
       .returning();
 
@@ -149,7 +150,6 @@ export async function POST(req: NextRequest) {
       })),
     );
 
-    // Артефакт квеста
     const artifactSlug = `${slug}-artifact`;
     const existingArtifact = await db
       .select({ id: artifacts.id })
@@ -167,7 +167,12 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    return NextResponse.json({ ok: true, questId: quest.id, slug });
+    return NextResponse.json({
+      ok: true,
+      questId: quest.id,
+      slug,
+      status: 'draft',
+    });
   } catch (e) {
     console.error('[employer/quests:create]', e);
     return NextResponse.json(

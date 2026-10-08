@@ -6,6 +6,7 @@ import { quests, bossPhases, submissions, heroes } from '@/db/schema';
 import { getCurrentCustomer } from '@/lib/customer-auth';
 import { EmployerSubmissionRow } from '@/components/EmployerSubmissionRow';
 import { ArchiveQuestButton } from '@/components/ArchiveQuestButton';
+import { PublishQuestButton } from '@/components/employer/PublishQuestButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,8 +57,12 @@ export default async function EmployerQuestPage({
 
   const victories = subs.filter((s) => s.status === 'victory').length;
   const uniqueHeroes = new Set(subs.map((s) => s.heroId)).size;
-  const shortlisted = subs.filter((s) => s.employerStatus === 'shortlisted').length;
-  const interviews = subs.filter((s) => s.employerStatus === 'interview').length;
+  const shortlisted = subs.filter(
+    (s) => s.employerStatus === 'shortlisted',
+  ).length;
+  const interviews = subs.filter(
+    (s) => s.employerStatus === 'interview',
+  ).length;
   const hired = subs.filter((s) => s.employerStatus === 'hired').length;
 
   const statusLabel =
@@ -137,22 +142,34 @@ export default async function EmployerQuestPage({
           </div>
 
           <div className="flex gap-3 mt-5 flex-wrap">
+            {quest.status === 'draft' && (
+              <PublishQuestButton questId={quest.id} />
+            )}
             <Link
               href={`/employer/quests/${quest.id}/edit`}
               className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-amber-500/60"
             >
               Редактировать
             </Link>
-            <Link
-              href={`/quests/${quest.slug}`}
-              className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-amber-500/60"
-            >
-              Публичная страница
-            </Link>
+            {quest.status === 'active' && (
+              <Link
+                href={`/quests/${quest.slug}`}
+                className="px-4 py-2 rounded-md border border-zinc-700 text-sm text-zinc-300 hover:border-amber-500/60"
+              >
+                Публичная страница
+              </Link>
+            )}
             {quest.status === 'active' && (
               <ArchiveQuestButton questId={quest.id} />
             )}
           </div>
+
+          {quest.status === 'draft' && (
+            <div className="mt-4 pt-4 border-t border-white/5 text-xs text-zinc-500">
+              Квест находится в черновике и не виден героям. Нажми
+              «Опубликовать», чтобы он появился на доске.
+            </div>
+          )}
         </div>
 
         <h2 className="text-sm text-zinc-500 tracking-widest mt-8 mb-3">
@@ -185,8 +202,9 @@ export default async function EmployerQuestPage({
 
         {subs.length === 0 ? (
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-6 text-zinc-500 text-sm">
-            Пока никто не сдавал этот квест. Поделитесь ссылкой на публичную
-            страницу.
+            {quest.status === 'draft'
+              ? 'Квест ещё не опубликован. Опубликуй его, чтобы герои начали сдавать.'
+              : 'Пока никто не сдавал этот квест. Поделитесь ссылкой на публичную страницу.'}
           </div>
         ) : (
           <div className="space-y-3">

@@ -2,12 +2,13 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { eq, desc, sql, and } from 'drizzle-orm';
 import { db } from '@/db';
-import { quests, submissions } from '@/db/schema';
+import { quests, submissions, customers } from '@/db/schema';
 import { getCurrentCustomer } from '@/lib/customer-auth';
 import { withRetry } from '@/lib/db-retry';
 import { EmployerLogoutButton } from '@/components/EmployerLogoutButton';
 import { HeroBackground } from '@/components/home/HeroBackground';
 import { TiltCard } from '@/components/animations/TiltCard';
+import { EmailVerificationBanner } from '@/components/employer/EmailVerificationBanner';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +31,17 @@ export default async function EmployerDashboard({
   const { status: statusRaw } = await searchParams;
   const filter = parseStatus(statusRaw);
 
-  // ==================== Квесты компании ====================
+  const [customerRow] = await withRetry(
+    () =>
+      db
+        .select({ emailVerifiedAt: customers.emailVerifiedAt })
+        .from(customers)
+        .where(eq(customers.id, customer.id)),
+    { label: 'employer:load-verification' },
+  ).catch(() => []);
+
+  const isVerified = !!customerRow?.emailVerifiedAt;
+
   let myQuests: (typeof quests.$inferSelect)[] = [];
   try {
     myQuests = await withRetry(
@@ -46,7 +57,6 @@ export default async function EmployerDashboard({
     console.error('[employer] quests failed:', (e as Error).message);
   }
 
-  // ==================== Статистика по сдачам ====================
   let statsMap = new Map<
     number,
     { total: number; victories: number; uniqueHeroes: number }
@@ -83,7 +93,6 @@ export default async function EmployerDashboard({
     console.error('[employer] stats failed:', (e as Error).message);
   }
 
-  // ==================== Сводная статистика ====================
   const totalQuests = myQuests.length;
   const activeQuests = myQuests.filter((q) => q.status === 'active').length;
   const draftQuests = myQuests.filter((q) => q.status === 'draft').length;
@@ -92,13 +101,11 @@ export default async function EmployerDashboard({
   const allStats = Array.from(statsMap.values());
   const totalSubmissions = allStats.reduce((s, v) => s + v.total, 0);
   const totalVictories = allStats.reduce((s, v) => s + v.victories, 0);
-  const totalUniqueHeroes = new Set<number>().size; // placeholder
   const winRate =
     totalSubmissions > 0
       ? Math.round((totalVictories / totalSubmissions) * 100)
       : 0;
 
-  // Уникальные герои по всем квестам компании
   let uniqueHeroesTotal = 0;
   try {
     const [agg] = await withRetry(
@@ -117,7 +124,6 @@ export default async function EmployerDashboard({
     console.error('[employer] unique-heroes failed:', (e as Error).message);
   }
 
-  // ==================== Фильтрация по статусу ====================
   const visibleQuests = myQuests.filter((q) => {
     if (filter === 'all') return true;
     return q.status === filter;
@@ -127,20 +133,17 @@ export default async function EmployerDashboard({
     value: StatusFilter;
     label: string;
     count: number;
-    color: string;
   }[] = [
-    { value: 'all', label: 'Все', count: totalQuests, color: 'amber' },
-    { value: 'active', label: 'Активные', count: activeQuests, color: 'emerald' },
-    { value: 'draft', label: 'Черновики', count: draftQuests, color: 'zinc' },
-    { value: 'archived', label: 'Архив', count: archivedQuests, color: 'amber' },
+    { value: 'all', label: 'Все', count: totalQuests },
+    { value: 'active', label: 'Активные', count: activeQuests },
+    { value: 'draft', label: 'Черновики', count: draftQuests },
+    { value: 'archived', label: 'Архив', count: archivedQuests },
   ];
 
-  const isNewCompany =
-    myQuests.length === 0 && totalSubmissions === 0;
+  const isNewCompany = myQuests.length === 0 && totalSubmissions === 0;
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      {/* ==================== HERO ==================== */}
       <section className="relative overflow-hidden">
         <HeroBackground />
 
@@ -155,12 +158,12 @@ export default async function EmployerDashboard({
             <EmployerLogoutButton />
           </div>
 
-          {/* Карточка компании */}
+          {!isVerified && <EmailVerificationBanner />}
+
           <div className="glass rounded-3xl p-7 relative overflow-hidden">
             <div className="absolute -top-24 -right-24 w-64 h-64 rounded-full bg-violet-500/15 blur-[80px]" />
 
             <div className="relative flex items-start gap-6 flex-wrap">
-              {/* Логотип-инициал */}
               <div className="shrink-0 w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-500/30 to-violet-500/5 border border-violet-500/30 grid place-items-center text-3xl font-bold text-violet-300">
                 {customer.companyName.charAt(0).toUpperCase()}
               </div>
@@ -191,7 +194,6 @@ export default async function EmployerDashboard({
             </div>
           </div>
 
-          {/* Сводная статистика */}
           {!isNewCompany && (
             <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
               <StatCard
@@ -199,9 +201,7 @@ export default async function EmployerDashboard({
                 value={String(totalQuests)}
                 icon="📜"
                 sub={
-                  activeQuests > 0
-                    ? `${activeQuests} активных`
-                    : undefined
+                  activeQuests > 0 ? `${activeQuests} активных` : undefined
                 }
               />
               <StatCard
@@ -209,7 +209,7 @@ export default async function EmployerDashboard({
                 value={String(totalSubmissions)}
                 icon="🎯"
                 sub={
-                  totalUniqueHeroes > 0
+                  uniqueHeroesTotal > 0
                     ? `от ${uniqueHeroesTotal} героев`
                     : undefined
                 }
@@ -220,24 +220,18 @@ export default async function EmployerDashboard({
                 icon="🏆"
                 accent
               />
-              <StatCard
-                label="Win rate"
-                value={`${winRate}%`}
-                icon="📊"
-              />
+              <StatCard label="Win rate" value={`${winRate}%`} icon="📊" />
             </div>
           )}
         </div>
       </section>
 
-      {/* ==================== ФИЛЬТРЫ ==================== */}
       {totalQuests > 0 && (
         <section className="relative max-w-5xl mx-auto px-6 pb-6">
           <div className="flex flex-wrap gap-2">
             {FILTERS.map((f) => {
               const active = filter === f.value;
               const disabled = f.count === 0 && !active;
-
               if (disabled) return null;
 
               return (
@@ -271,7 +265,6 @@ export default async function EmployerDashboard({
         </section>
       )}
 
-      {/* ==================== СПИСОК КВЕСТОВ ==================== */}
       <section className="relative max-w-5xl mx-auto px-6 pb-20">
         {myQuests.length === 0 ? (
           <EmptyState />
@@ -298,7 +291,8 @@ export default async function EmployerDashboard({
               const statusMeta = {
                 active: {
                   label: 'активен',
-                  color: 'bg-emerald-500/15 text-emerald-300 border-emerald-700/40',
+                  color:
+                    'bg-emerald-500/15 text-emerald-300 border-emerald-700/40',
                 },
                 draft: {
                   label: 'черновик',
@@ -306,7 +300,8 @@ export default async function EmployerDashboard({
                 },
                 archived: {
                   label: 'архив',
-                  color: 'bg-amber-500/15 text-amber-300 border-amber-700/40',
+                  color:
+                    'bg-amber-500/15 text-amber-300 border-amber-700/40',
                 },
               }[q.status];
 
@@ -348,7 +343,6 @@ export default async function EmployerDashboard({
                           </div>
                         </div>
 
-                        {/* Статы по квесту */}
                         <div className="shrink-0 flex gap-4">
                           <QuestStat
                             label="сдач"
@@ -368,7 +362,6 @@ export default async function EmployerDashboard({
                         </div>
                       </div>
 
-                      {/* Прогресс-полоса winrate */}
                       {total > 0 && (
                         <div className="relative mt-4 h-1 rounded-full bg-white/5 overflow-hidden">
                           <div
@@ -386,7 +379,6 @@ export default async function EmployerDashboard({
         )}
       </section>
 
-      {/* ==================== ПОМОЩЬ ==================== */}
       {myQuests.length > 0 && (
         <section className="relative max-w-5xl mx-auto px-6 pb-20">
           <div className="glass rounded-2xl p-6">
@@ -418,8 +410,6 @@ export default async function EmployerDashboard({
     </main>
   );
 }
-
-// ==================== ХЕЛПЕРЫ ====================
 
 function StatCard({
   label,
@@ -512,8 +502,8 @@ function EmptyState() {
         </h2>
         <p className="text-zinc-400 mb-8 max-w-lg mx-auto">
           Опишите задачу, задайте критерии проверки — и герои начнут её
-          проходить. Платформа сама проверит код в Docker, прогонит тесты
-          и оценит через AI.
+          проходить. Платформа сама проверит код в Docker, прогонит тесты и
+          оценит через AI.
         </p>
 
         <div className="flex gap-3 justify-center flex-wrap">
@@ -544,7 +534,7 @@ function EmptyState() {
           />
           <HowItWorks
             n="3"
-            title="Публикуй"
+            title="Опубликуй"
             text="Квест появится на доске для всех героев."
           />
         </div>

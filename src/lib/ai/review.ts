@@ -1,7 +1,12 @@
+import { eq } from 'drizzle-orm';
+import { db } from '@/db';
+import { aiReviewCache } from '@/db/schema';
 import { getFilesBatch } from '../github';
 import type { GhContentItem } from '../github';
 import { chat, getProviderInfo } from './client';
+import { recordAiUsage } from './usage';
 import { withRetry } from '../db-retry';
+import { logger } from '../logger';
 
 export type AIReviewIssue = {
   file: string;
@@ -66,6 +71,7 @@ export async function runAIReview(
   readme: string | null,
   packageJson: Record<string, unknown> | null,
   staticIssuesHint: number,
+  cacheKey?: string,
 ): Promise<AIReviewResult> {
   const info = getProviderInfo();
   if (!info.ready) {
@@ -80,6 +86,34 @@ export async function runAIReview(
       durationMs: 0,
       reason: info.reason ?? 'AI-провайдер недоступен',
     };
+  }
+
+  // Проверяем кэш
+  if (cacheKey) {
+    try {
+      const [cached] = await withRetry(
+        () =>
+          db
+            .select({ payload: aiReviewCache.payload })
+            .from(aiReviewCache)
+            .where(eq(aiReviewCache.cacheKey, cacheKey)),
+        { label: 'ai-review:cache-lookup' },
+      );
+
+      if (cached?.payload) {
+        const cachedResult = cached.payload as AIReviewResult;
+        logger.info('ai-review.cache.hit', { cacheKey });
+        return {
+          ...cachedResult,
+          durationMs: 0,
+          reason: 'cache',
+        };
+      }
+    } catch (e) {
+      logger.warn('ai-review.cache.lookup.failed', {
+        message: (e as Error).message,
+      });
+    }
   }
 
   const t0 = Date.now();
@@ -125,6 +159,15 @@ ${context.files
       timeoutMs: 300_000,
     });
 
+    await recordAiUsage({
+      provider: result.provider,
+      model: result.model,
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      durationMs: result.durationMs,
+      status: 'ok',
+    });
+
     const parsed = parseReviewJson(result.text);
     if (!parsed) {
       return {
@@ -140,7 +183,7 @@ ${context.files
       };
     }
 
-    return {
+    const finalResult: AIReviewResult = {
       ok: true,
       score: clampScore(parsed.score),
       summary: String(parsed.summary ?? '').slice(0, 500),
@@ -157,7 +200,37 @@ ${context.files
       model: info.model,
       durationMs: Date.now() - t0,
     };
+
+    // Сохраняем в кэш
+    if (cacheKey) {
+      try {
+        await db
+          .insert(aiReviewCache)
+          .values({
+            cacheKey,
+            payload: finalResult,
+          })
+          .onConflictDoNothing();
+      } catch (e) {
+        logger.warn('ai-review.cache.save.failed', {
+          message: (e as Error).message,
+        });
+      }
+    }
+
+    return finalResult;
   } catch (e) {
+    const durationMs = Date.now() - t0;
+    const errorMessage = (e as Error).message.slice(0, 300);
+
+    await recordAiUsage({
+      provider: info.provider,
+      model: info.model,
+      durationMs,
+      status: 'error',
+      errorMessage,
+    });
+
     return {
       ok: false,
       score: 0,
@@ -166,8 +239,8 @@ ${context.files
       issues: [],
       provider: info.provider,
       model: info.model,
-      durationMs: Date.now() - t0,
-      reason: (e as Error).message.slice(0, 300),
+      durationMs,
+      reason: errorMessage,
     };
   }
 }
@@ -201,8 +274,6 @@ async function buildReviewContext(
     )
     .filter((i) => !/\.(test|spec)\./.test(i.path));
 
-  // Берём топ-3 файла по размеру, не больше 150 строк каждый.
-  // Меньше контекста → быстрее inference у локальной модели.
   const topFiles = codeFiles.sort((a, b) => b.size - a.size).slice(0, 3);
 
   const fileContents = await withRetry(

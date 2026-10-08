@@ -3,11 +3,43 @@ import { sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { isDockerAvailable } from '@/lib/docker/client';
 import { getProviderInfo } from '@/lib/ai/client';
+import { getAiUsageStats } from '@/lib/ai/usage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const startTime = Date.now();
+
+// Простой in-memory rate limit: максимум 60 запросов в минуту с одного IP.
+// Для health-check этого хватит, ставить в БД — избыточно.
+const healthRateLimit = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 60;
+
+function checkHealthRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = healthRateLimit.get(ip);
+
+  if (!entry || now > entry.resetAt) {
+    healthRateLimit.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+
+  if (entry.count >= RATE_LIMIT_MAX) return false;
+  entry.count++;
+  return true;
+}
+
+// Периодическая очистка памяти — раз в 5 минут
+let lastCleanup = 0;
+function maybeCleanup() {
+  const now = Date.now();
+  if (now - lastCleanup < 5 * 60 * 1000) return;
+  lastCleanup = now;
+  for (const [ip, entry] of healthRateLimit.entries()) {
+    if (now > entry.resetAt) healthRateLimit.delete(ip);
+  }
+}
 
 type Check = {
   ok: boolean;
@@ -28,7 +60,21 @@ async function withTimeout<T>(
   ]);
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  maybeCleanup();
+
+  const forwarded = req.headers.get('x-forwarded-for');
+  const ip = forwarded
+    ? forwarded.split(',')[0].trim()
+    : req.headers.get('x-real-ip') ?? 'unknown';
+
+  if (!checkHealthRateLimit(ip)) {
+    return NextResponse.json(
+      { status: 'rate_limited' },
+      { status: 429, headers: { 'Retry-After': '60' } },
+    );
+  }
+
   const checks: Record<string, Check> = {};
 
   // --- Database ---
@@ -77,10 +123,17 @@ export async function GET() {
     };
   }
 
+  // --- AI usage (не критично, но полезно) ---
+  let aiStats: Awaited<ReturnType<typeof getAiUsageStats>> | null = null;
+  try {
+    aiStats = await withTimeout(getAiUsageStats(), 2000, 'ai-stats');
+  } catch {
+    /* ignore */
+  }
+
   const dbOk = checks.database.ok;
   const othersOk = checks.docker.ok && checks.ai.ok;
 
-  // down — только если БД недоступна. Docker/AI — degraded.
   const status: 'ok' | 'degraded' | 'down' = !dbOk
     ? 'down'
     : othersOk
@@ -96,6 +149,7 @@ export async function GET() {
       timestamp: new Date().toISOString(),
       version: process.env.NEXT_PUBLIC_APP_VERSION ?? 'dev',
       checks,
+      ai: aiStats,
     },
     {
       status: httpStatus,

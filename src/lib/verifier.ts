@@ -18,6 +18,8 @@ import { isDockerAvailable } from './docker/client';
 import { runAIReview } from './ai/review';
 import { getProviderInfo } from './ai/client';
 
+const MAX_REPO_SIZE_KB = 100 * 1024; // 100 MB
+
 export type QuestPhase = {
   phaseOrder: number;
   name: string;
@@ -128,7 +130,12 @@ const CHECKS: Record<string, CheckFn> = {
     logs.push(
       hasBuild ? `✔ Скрипт build: ${scripts.build}` : '✘ Скрипт build не найден',
     );
-    const lockFiles = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb'];
+    const lockFiles = [
+      'package-lock.json',
+      'pnpm-lock.yaml',
+      'yarn.lock',
+      'bun.lockb',
+    ];
     const hasLock = names.some((n) => lockFiles.includes(n));
     logs.push(hasLock ? '✔ Lock-файл на месте' : '⚠ Lock-файл отсутствует');
     return { passed: hasPkg && hasBuild, logs };
@@ -157,16 +164,21 @@ const CHECKS: Record<string, CheckFn> = {
   tests: async ({ tree, packageJson }) => {
     const logs: string[] = [];
     const paths = tree.map((i) => i.path);
-    const testFiles = paths.filter((p) => /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(p));
+    const testFiles = paths.filter((p) =>
+      /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(p),
+    );
     logs.push(
       testFiles.length > 0
         ? `✔ Найдено тестовых файлов: ${testFiles.length}`
         : '✘ Тестовые файлы не найдены',
     );
     const scripts = (packageJson?.scripts as Record<string, string>) ?? {};
-    const hasTestScript = !!scripts.test && !scripts.test.includes('no test specified');
+    const hasTestScript =
+      !!scripts.test && !scripts.test.includes('no test specified');
     logs.push(
-      hasTestScript ? `✔ Скрипт test: ${scripts.test}` : '✘ Скрипт test не настроен',
+      hasTestScript
+        ? `✔ Скрипт test: ${scripts.test}`
+        : '✘ Скрипт test не настроен',
     );
     const devDeps = (packageJson?.devDependencies as Record<string, string>) ?? {};
     const hasRunner = Object.keys(devDeps).some((d) =>
@@ -267,7 +279,9 @@ const CHECKS: Record<string, CheckFn> = {
       /ERROR|HIGH/i.test(f.severity),
     );
     if (highSeverity.length > 0) {
-      logs.push(`✘ Semgrep нашёл ${highSeverity.length} проблем высокой критичности`);
+      logs.push(
+        `✘ Semgrep нашёл ${highSeverity.length} проблем высокой критичности`,
+      );
       for (const f of highSeverity.slice(0, 3)) {
         logs.push(`  → ${f.file}:${f.line} ${f.rule}`);
       }
@@ -412,7 +426,9 @@ const CHECKS: Record<string, CheckFn> = {
     const e2eDir = paths.some((p) =>
       /(^|\/)(e2e|cypress|playwright|tests-e2e)\//.test(p),
     );
-    logs.push(e2eDir ? '✔ Директория E2E-тестов найдена' : '✘ Директория E2E не найдена');
+    logs.push(
+      e2eDir ? '✔ Директория E2E-тестов найдена' : '✘ Директория E2E не найдена',
+    );
     const deps = {
       ...((packageJson?.dependencies as object) ?? {}),
       ...((packageJson?.devDependencies as object) ?? {}),
@@ -470,7 +486,9 @@ const CHECKS: Record<string, CheckFn> = {
     const hasLicense =
       !!repoMeta.license && repoMeta.license.spdx_id !== 'NOASSERTION';
     logs.push(
-      hasLicense ? `✔ Лицензия: ${repoMeta.license!.spdx_id}` : '⚠ Лицензия отсутствует',
+      hasLicense
+        ? `✔ Лицензия: ${repoMeta.license!.spdx_id}`
+        : '⚠ Лицензия отсутствует',
     );
     const hasTs = paths.some((p) => p.endsWith('.ts') || p.endsWith('.tsx'));
     logs.push(hasTs ? '✔ TypeScript в проекте' : '⚠ Только JavaScript');
@@ -496,6 +514,9 @@ const CHECKS: Record<string, CheckFn> = {
     const staticErrors = ctx.staticResult?.score.errors ?? 0;
     const staticWarnings = ctx.staticResult?.score.warnings ?? 0;
 
+    // Ключ кэша: репо + время последнего пуша
+    const cacheKey = `${ctx.owner}/${ctx.repo}@${ctx.repoMeta.pushed_at}`;
+
     const res = await runAIReview(
       ctx.owner,
       ctx.repo,
@@ -503,6 +524,7 @@ const CHECKS: Record<string, CheckFn> = {
       ctx.readme,
       ctx.packageJson,
       staticErrors + staticWarnings,
+      cacheKey,
     );
 
     if (!res.ok) {
@@ -519,7 +541,13 @@ const CHECKS: Record<string, CheckFn> = {
 
     const logs: string[] = [];
     logs.push(`✔ Провайдер: ${res.provider} / ${res.model}`);
-    logs.push(`✔ Время ответа: ${(res.durationMs / 1000).toFixed(1)}с`);
+
+    if (res.reason === 'cache') {
+      logs.push('✔ Результат из кэша (репо не менялось)');
+    } else {
+      logs.push(`✔ Время ответа: ${(res.durationMs / 1000).toFixed(1)}с`);
+    }
+
     logs.push(`✔ Оценка кода: ${res.score}/100`);
     logs.push(`✔ Найдено замечаний: ${res.issues.length}`);
 
@@ -645,7 +673,9 @@ const CHECKS: Record<string, CheckFn> = {
     const hasCache =
       /actions\/cache|setup-node.*cache|cache:.*npm|cache:.*pnpm/.test(all);
     logs.push(
-      hasCache ? '✔ Кэш зависимостей настроен' : '⚠ Кэш не обнаружен (не критично)',
+      hasCache
+        ? '✔ Кэш зависимостей настроен'
+        : '⚠ Кэш не обнаружен (не критично)',
     );
     return { passed: hasCache, logs };
   },
@@ -695,6 +725,35 @@ export async function runVerification(
   let repoMeta;
   try {
     repoMeta = await getRepo(ref.owner, ref.repo);
+
+    // Проверка размера репозитория
+    if (repoMeta.size > MAX_REPO_SIZE_KB) {
+      const sizeMB = (repoMeta.size / 1024).toFixed(0);
+      const msg = `Репозиторий слишком большой: ${sizeMB} MB. Максимум — 100 MB.`;
+
+      console.warn('[verify] repo too large:', {
+        owner: ref.owner,
+        repo: ref.repo,
+        sizeKb: repoMeta.size,
+      });
+
+      return {
+        repoUrl,
+        totalDamage: 0,
+        bossMaxHp: bossMaxHpTotal,
+        victory: false,
+        phases: sorted.map((p, idx) => ({
+          order: p.phaseOrder,
+          name: p.name,
+          description: p.description,
+          maxHp: p.maxHp,
+          damage: 0,
+          passed: false,
+          logs: [idx === 0 ? `✘ ${msg}` : '— пропущено'],
+        })),
+        summary: msg,
+      };
+    }
   } catch (e) {
     const err = e as Error;
     const msg =

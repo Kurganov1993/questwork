@@ -93,6 +93,7 @@ export const customers = pgTable('customers', {
   companyName: varchar('company_name', { length: 128 }).notNull(),
   slug: varchar('slug', { length: 64 }).notNull().unique(),
   termsAcceptedAt: timestamp('terms_accepted_at'),
+  emailVerifiedAt: timestamp('email_verified_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
@@ -108,6 +109,22 @@ export const customerSessions = pgTable(
   },
   (t) => ({
     customerIdx: index('customer_sessions_customer_idx').on(t.customerId),
+  }),
+);
+
+export const emailVerifications = pgTable(
+  'email_verifications',
+  {
+    id: serial('id').primaryKey(),
+    token: varchar('token', { length: 64 }).notNull().unique(),
+    customerId: integer('customer_id')
+      .notNull()
+      .references(() => customers.id, { onDelete: 'cascade' }),
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    customerIdx: index('email_verif_customer_idx').on(t.customerId),
   }),
 );
 
@@ -131,6 +148,7 @@ export const quests = pgTable('quests', {
     onDelete: 'cascade',
   }),
   status: questStatusEnum('status').notNull().default('active'),
+  publishedAt: timestamp('published_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
@@ -277,6 +295,48 @@ export const rateLimits = pgTable(
       t.bucket,
       t.key,
     ),
+  }),
+);
+
+// ============================================================
+// AI usage и кэш
+// ============================================================
+
+export const aiUsage = pgTable(
+  'ai_usage',
+  {
+    id: serial('id').primaryKey(),
+    heroId: integer('hero_id').references(() => heroes.id, {
+      onDelete: 'set null',
+    }),
+    questId: integer('quest_id').references(() => quests.id, {
+      onDelete: 'set null',
+    }),
+    provider: varchar('provider', { length: 64 }).notNull(),
+    model: varchar('model', { length: 128 }).notNull(),
+    tokensIn: integer('tokens_in').notNull().default(0),
+    tokensOut: integer('tokens_out').notNull().default(0),
+    durationMs: integer('duration_ms').notNull().default(0),
+    status: varchar('status', { length: 32 }).notNull().default('ok'),
+    errorMessage: text('error_message'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    heroIdx: index('ai_usage_hero_idx').on(t.heroId),
+    createdIdx: index('ai_usage_created_idx').on(t.createdAt),
+  }),
+);
+
+export const aiReviewCache = pgTable(
+  'ai_review_cache',
+  {
+    id: serial('id').primaryKey(),
+    cacheKey: varchar('cache_key', { length: 256 }).notNull().unique(),
+    payload: jsonb('payload').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    createdIdx: index('ai_review_cache_created_idx').on(t.createdAt),
   }),
 );
 
