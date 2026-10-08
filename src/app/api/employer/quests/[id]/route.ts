@@ -5,6 +5,7 @@ import { eq, and } from 'drizzle-orm';
 import { getCurrentCustomer } from '@/lib/customer-auth';
 import { CHECK_TYPES } from '@/lib/check-types';
 import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 
@@ -42,7 +43,7 @@ export async function PATCH(
     }
 
     const rl = await checkRateLimit(
-      'employerCreate',
+      'submissionStatus',
       `customer:${customer.id}`,
     );
     if (!rl.allowed) return rateLimitResponse(rl);
@@ -69,20 +70,13 @@ export async function PATCH(
     }
 
     const body = (await req.json()) as Body;
-
     const update: Partial<typeof quests.$inferInsert> = {};
 
     if (typeof body.title === 'string') {
       const t = body.title.trim();
-      if (t.length < 3) {
+      if (t.length < 3 || t.length > 128) {
         return NextResponse.json(
-          { ok: false, error: 'Название минимум 3 символа' },
-          { status: 400 },
-        );
-      }
-      if (t.length > 128) {
-        return NextResponse.json(
-          { ok: false, error: 'Название максимум 128 символов' },
+          { ok: false, error: 'Название 3–128 символов' },
           { status: 400 },
         );
       }
@@ -91,15 +85,9 @@ export async function PATCH(
 
     if (typeof body.description === 'string') {
       const d = body.description.trim();
-      if (d.length < 10) {
+      if (d.length < 10 || d.length > 5000) {
         return NextResponse.json(
-          { ok: false, error: 'Описание минимум 10 символов' },
-          { status: 400 },
-        );
-      }
-      if (d.length > 5000) {
-        return NextResponse.json(
-          { ok: false, error: 'Описание максимум 5000 символов' },
+          { ok: false, error: 'Описание 10–5000 символов' },
           { status: 400 },
         );
       }
@@ -112,15 +100,9 @@ export async function PATCH(
 
     if (typeof body.bossName === 'string') {
       const b = body.bossName.trim();
-      if (b.length < 2) {
+      if (b.length < 2 || b.length > 128) {
         return NextResponse.json(
-          { ok: false, error: 'Имя босса минимум 2 символа' },
-          { status: 400 },
-        );
-      }
-      if (b.length > 128) {
-        return NextResponse.json(
-          { ok: false, error: 'Имя босса максимум 128 символов' },
+          { ok: false, error: 'Имя босса 2–128 символов' },
           { status: 400 },
         );
       }
@@ -167,15 +149,9 @@ export async function PATCH(
 
       const validCheckTypes = new Set(CHECK_TYPES.map((c) => c.value));
       for (const p of body.phases) {
-        if (!p.name || p.name.trim().length < 2) {
+        if (!p.name || p.name.trim().length < 2 || p.name.trim().length > 128) {
           return NextResponse.json(
-            { ok: false, error: 'У каждой фазы должно быть название' },
-            { status: 400 },
-          );
-        }
-        if (p.name.trim().length > 128) {
-          return NextResponse.json(
-            { ok: false, error: 'Название фазы максимум 128 символов' },
+            { ok: false, error: 'Название фазы 2–128 символов' },
             { status: 400 },
           );
         }
@@ -191,15 +167,9 @@ export async function PATCH(
             { status: 400 },
           );
         }
-        if (!Number.isFinite(p.maxHp) || p.maxHp <= 0) {
+        if (!Number.isFinite(p.maxHp) || p.maxHp <= 0 || p.maxHp > 500) {
           return NextResponse.json(
-            { ok: false, error: 'maxHp должен быть > 0' },
-            { status: 400 },
-          );
-        }
-        if (p.maxHp > 500) {
-          return NextResponse.json(
-            { ok: false, error: 'HP фазы максимум 500' },
+            { ok: false, error: 'maxHp должен быть 1–500' },
             { status: 400 },
           );
         }
@@ -229,7 +199,9 @@ export async function PATCH(
 
     return NextResponse.json({ ok: true });
   } catch (e) {
-    console.error('[employer/quests:PATCH]', e);
+    logger.error('employer/quests:PATCH', {
+      message: (e as Error).message,
+    });
     return NextResponse.json(
       { ok: false, error: 'Внутренняя ошибка' },
       { status: 500 },
@@ -238,7 +210,7 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
@@ -265,14 +237,31 @@ export async function DELETE(
       );
     }
 
-    await db
-      .update(quests)
-      .set({ status: 'archived' })
-      .where(eq(quests.id, questId));
+    const { searchParams } = new URL(req.url);
+    const mode = searchParams.get('mode') ?? 'archive';
 
-    return NextResponse.json({ ok: true });
+    if (mode === 'delete') {
+      await db.delete(quests).where(eq(quests.id, questId));
+      logger.info('employer.quest.deleted', {
+        customerId: customer.id,
+        questId,
+      });
+    } else {
+      await db
+        .update(quests)
+        .set({ status: 'archived' })
+        .where(eq(quests.id, questId));
+      logger.info('employer.quest.archived', {
+        customerId: customer.id,
+        questId,
+      });
+    }
+
+    return NextResponse.json({ ok: true, mode });
   } catch (e) {
-    console.error('[employer/quests:DELETE]', e);
+    logger.error('employer/quests:DELETE', {
+      message: (e as Error).message,
+    });
     return NextResponse.json(
       { ok: false, error: 'Внутренняя ошибка' },
       { status: 500 },

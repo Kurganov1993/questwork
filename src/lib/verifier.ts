@@ -18,8 +18,9 @@ import { isDockerAvailable } from './docker/client';
 import { runAIReview } from './ai/review';
 import { getProviderInfo } from './ai/client';
 import { checkAiQuota } from './ai/quota';
+import { logger } from './logger';
 
-const MAX_REPO_SIZE_KB = 100 * 1024; // 100 MB
+const MAX_REPO_SIZE_KB = 100 * 1024;
 
 export type QuestPhase = {
   phaseOrder: number;
@@ -514,7 +515,6 @@ const CHECKS: Record<string, CheckFn> = {
       };
     }
 
-    // === Проверка дневной квоты AI ===
     if (ctx.heroId) {
       const quota = await checkAiQuota(ctx.heroId);
       if (!quota.allowed) {
@@ -753,12 +753,11 @@ export async function runVerification(
   try {
     repoMeta = await getRepo(ref.owner, ref.repo);
 
-    // Проверка размера репозитория
     if (repoMeta.size > MAX_REPO_SIZE_KB) {
       const sizeMB = (repoMeta.size / 1024).toFixed(0);
       const msg = `Репозиторий слишком большой: ${sizeMB} MB. Максимум — 100 MB.`;
 
-      console.warn('[verify] repo too large:', {
+      logger.warn('verify.repo.too-large', {
         owner: ref.owner,
         repo: ref.repo,
         sizeKb: repoMeta.size,
@@ -788,7 +787,7 @@ export async function runVerification(
         ? e.message
         : `Не удалось получить репозиторий: ${err.message}`;
 
-    console.error('[verify] getRepo failed:', {
+    logger.error('verify.getRepo.failed', {
       owner: ref.owner,
       repo: ref.repo,
       status: e instanceof GitHubError ? e.status : null,
@@ -875,7 +874,10 @@ export async function runVerification(
           ),
         ]);
       } catch (e) {
-        console.error(`[verify] phase "${phase.name}" crashed:`, e);
+        logger.error('verify.phase.crashed', {
+          phase: phase.name,
+          message: (e as Error).message,
+        });
         result = {
           passed: false,
           logs: [`✘ Ошибка проверки: ${(e as Error).message}`],
@@ -903,7 +905,9 @@ export async function runVerification(
       try {
         onPhase(phaseResult, results.length - 1, sorted.length);
       } catch (e) {
-        console.error('[verifier] onPhase callback failed:', e);
+        logger.error('verify.onPhase.failed', {
+          message: (e as Error).message,
+        });
       }
     }
   }

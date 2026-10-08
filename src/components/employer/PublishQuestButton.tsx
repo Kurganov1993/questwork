@@ -15,6 +15,10 @@ export function PublishQuestButton({ questId }: { questId: number }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'active' }),
       });
+      if (res.status === 401) {
+        window.location.href = '/employer/login';
+        return;
+      }
       if (res.ok) {
         router.refresh();
       }

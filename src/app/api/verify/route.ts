@@ -14,6 +14,8 @@ import {
   getQueuePosition,
   getBuildQueueStats,
 } from '@/lib/build-lock';
+import { checkRepoRepeat, repoKeyFromUrl } from '@/lib/verify-limits';
+import { notifyEmployerAboutSubmission } from '@/lib/notify-employer';
 import { reportError } from '@/lib/error-reporting';
 import { logger } from '@/lib/logger';
 import type { VerifyReport } from '@/lib/types';
@@ -58,7 +60,6 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // === Слот сборки ===
         const queuePos = getQueuePosition();
         if (queuePos > 0) {
           send(controller, {
@@ -101,6 +102,17 @@ export async function POST(req: NextRequest) {
 
         if (!repoUrl || typeof repoUrl !== 'string') {
           send(controller, { type: 'error', message: 'repoUrl обязателен' });
+          controller.close();
+          return;
+        }
+
+        // Проверяем повторную сдачу этого репо
+        const repeat = await checkRepoRepeat(hero.id, repoUrl);
+        if (!repeat.allowed) {
+          send(controller, {
+            type: 'error',
+            message: repeat.message ?? 'Слишком частая сдача этого репо.',
+          });
           controller.close();
           return;
         }
@@ -185,6 +197,7 @@ export async function POST(req: NextRequest) {
                 heroId: hero.id,
                 questId: quest.id,
                 repoUrl,
+                repoKey: repoKeyFromUrl(repoUrl),
                 status: report.victory ? 'victory' : 'defeat',
                 damageDealt: report.totalDamage,
                 report: slimReport(report),
@@ -192,6 +205,19 @@ export async function POST(req: NextRequest) {
               .returning(),
           { label: 'verify:insert-submission' },
         );
+
+        // Уведомляем работодателя
+        if (quest.customerId) {
+          void notifyEmployerAboutSubmission({
+            customerId: quest.customerId,
+            heroNickname: hero.nickname,
+            questTitle: quest.title,
+            questSlug: quest.slug,
+            status: report.victory ? 'victory' : 'defeat',
+            damageDealt: report.totalDamage,
+            bossMaxHp: report.bossMaxHp,
+          });
+        }
 
         if (report.victory) {
           try {

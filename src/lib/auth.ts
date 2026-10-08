@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { heroes, sessions } from '@/db/schema';
 import { withRetry } from './db-retry';
+import { logger } from './logger';
 
 const scryptAsync = promisify(scrypt);
 
@@ -108,7 +109,9 @@ export async function getCurrentHero(): Promise<CurrentHero | null> {
       { label: 'auth:get-current-hero' },
     );
   } catch (e) {
-    console.error('[auth] getCurrentHero failed:', (e as Error).message);
+    logger.error('auth.getCurrentHero.failed', {
+      message: (e as Error).message,
+    });
     return null;
   }
 
@@ -139,8 +142,7 @@ export function validateNickname(nickname: string): string | null {
   const n = nickname.trim();
   if (n.length < 3) return 'Ник должен быть не короче 3 символов';
   if (n.length > 32) return 'Ник должен быть не длиннее 32 символов';
-  if (!/^[a-zA-Z0-9_-]+$/.test(n))
-    return 'Только латиница, цифры, _ и -';
+  if (!/^[a-zA-Z0-9_-]+$/.test(n)) return 'Только латиница, цифры, _ и -';
   return null;
 }
 

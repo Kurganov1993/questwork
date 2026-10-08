@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { quests, bossPhases, artifacts } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { getCurrentCustomer, slugify } from '@/lib/customer-auth';
 import { CHECK_TYPES } from '@/lib/check-types';
 import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit';
+import { withRetry } from '@/lib/db-retry';
 
 export const runtime = 'nodejs';
 
@@ -27,6 +28,8 @@ type Body = {
   phases?: PhaseInput[];
 };
 
+const MAX_ACTIVE_QUESTS = 10;
+
 export async function POST(req: NextRequest) {
   try {
     const customer = await getCurrentCustomer();
@@ -41,7 +44,36 @@ export async function POST(req: NextRequest) {
       'employerCreate',
       `customer:${customer.id}`,
     );
-    if (!rl.allowed) return rateLimitResponse(rl);
+    if (!rl.allowed) {
+      return rateLimitResponse(rl);
+    }
+
+    // Лимит активных квестов
+    const [activeRow] = await withRetry(
+      () =>
+        db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(quests)
+          .where(
+            and(
+              eq(quests.customerId, customer.id),
+              eq(quests.status, 'active'),
+            ),
+          ),
+      { label: 'employer:count-active' },
+    );
+
+    const activeCount = Number(activeRow?.n ?? 0);
+
+    if (activeCount >= MAX_ACTIVE_QUESTS) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Лимит активных квестов — ${MAX_ACTIVE_QUESTS}. Архивируй старые или отредактируй существующие.`,
+        },
+        { status: 429 },
+      );
+    }
 
     const body = (await req.json()) as Body;
 
@@ -58,7 +90,6 @@ export async function POST(req: NextRequest) {
     );
     const phases = Array.isArray(body.phases) ? body.phases : [];
 
-    // === Ограничения длины ===
     if (title.length < 3) {
       return NextResponse.json(
         { ok: false, error: 'Название минимум 3 символа' },

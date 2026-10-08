@@ -15,12 +15,14 @@ export function EmailVerificationBanner() {
       const res = await fetch('/api/employer/auth/send-verification', {
         method: 'POST',
       });
+      if (res.status === 401) {
+        window.location.href = '/employer/login';
+        return;
+      }
       const data = await res.json();
       if (data.ok) {
         setSent(true);
-        if (data.verifyUrl) {
-          setDevUrl(data.verifyUrl);
-        }
+        if (data.verifyUrl) setDevUrl(data.verifyUrl);
       } else {
         setError(data.error ?? 'Не удалось отправить письмо');
       }

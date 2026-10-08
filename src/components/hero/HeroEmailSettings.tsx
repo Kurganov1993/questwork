@@ -34,6 +34,10 @@ export function HeroEmailSettings({
           notifyByEmail: notify,
         }),
       });
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
       const data = await res.json();
       if (!data.ok) {
         setError(data.error ?? 'Не удалось сохранить');
@@ -56,6 +60,10 @@ export function HeroEmailSettings({
       const res = await fetch('/api/hero/settings/email/send-verification', {
         method: 'POST',
       });
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
       const data = await res.json();
       if (!data.ok) {
         setError(data.error ?? 'Не удалось отправить письмо');
@@ -79,11 +87,15 @@ export function HeroEmailSettings({
     setNotify(v);
     setSaving(true);
     try {
-      await fetch('/api/hero/settings/email', {
+      const res = await fetch('/api/hero/settings/email', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notifyByEmail: v }),
       });
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
     } catch {
       /* ignore */
     } finally {
@@ -137,9 +149,7 @@ export function HeroEmailSettings({
         {message && (
           <div className="mt-3 text-xs text-emerald-400">{message}</div>
         )}
-        {error && (
-          <div className="mt-3 text-xs text-red-400">{error}</div>
-        )}
+        {error && <div className="mt-3 text-xs text-red-400">{error}</div>}
         {devUrl && (
           <div className="mt-3 pt-3 border-t border-white/5">
             <div className="text-xs text-zinc-500 mb-1">

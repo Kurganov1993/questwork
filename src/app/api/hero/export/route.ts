@@ -11,6 +11,7 @@ import {
 } from '@/db/schema';
 import { getCurrentHero } from '@/lib/auth';
 import { withRetry } from '@/lib/db-retry';
+import { checkRateLimit } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
@@ -22,6 +23,19 @@ export async function GET() {
       return NextResponse.json(
         { ok: false, error: 'Не авторизован' },
         { status: 401 },
+      );
+    }
+
+    const rl = await checkRateLimit('heroExport', `hero:${hero.id}`);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Слишком много экспортов. Попробуй через ${Math.ceil(
+            rl.resetInSec / 60,
+          )} мин.`,
+        },
+        { status: 429 },
       );
     }
 

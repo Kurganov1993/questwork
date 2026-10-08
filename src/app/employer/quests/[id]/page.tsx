@@ -7,6 +7,7 @@ import { getCurrentCustomer } from '@/lib/customer-auth';
 import { EmployerSubmissionRow } from '@/components/EmployerSubmissionRow';
 import { ArchiveQuestButton } from '@/components/ArchiveQuestButton';
 import { PublishQuestButton } from '@/components/employer/PublishQuestButton';
+import { DeleteQuestButton } from '@/components/employer/DeleteQuestButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -162,6 +163,7 @@ export default async function EmployerQuestPage({
             {quest.status === 'active' && (
               <ArchiveQuestButton questId={quest.id} />
             )}
+            <DeleteQuestButton questId={quest.id} />
           </div>
 
           {quest.status === 'draft' && (

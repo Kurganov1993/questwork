@@ -85,6 +85,20 @@ export default async function HeroSettingsPage({
               📥 Скачать мои данные (JSON)
             </a>
           </div>
+
+          <div className="glass rounded-2xl p-6 mt-4">
+            <div className="font-semibold mb-1">GitHub</div>
+            <div className="text-xs text-zinc-500 mb-4">
+              Подключи GitHub, чтобы сдавать квесты в один клик — выбирая
+              репозиторий из списка вместо копирования ссылок.
+            </div>
+            <Link
+              href="/hero/github"
+              className="inline-block px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-zinc-300 text-sm hover:border-amber-500/60 hover:text-amber-400 transition"
+            >
+              🐙 Перейти к репозиториям →
+            </Link>
+          </div>
         </div>
       </section>
     </main>

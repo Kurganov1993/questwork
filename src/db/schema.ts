@@ -2,6 +2,7 @@ import {
   pgTable,
   pgEnum,
   serial,
+  bigserial,
   varchar,
   text,
   integer,
@@ -10,7 +11,6 @@ import {
   index,
   uniqueIndex,
   numeric,
-  bigserial,
   boolean,
 } from 'drizzle-orm/pg-core';
 
@@ -142,6 +142,10 @@ export const emailVerifications = pgTable(
   }),
 );
 
+// ============================================================
+// Сброс пароля
+// ============================================================
+
 export const passwordResets = pgTable(
   'password_resets',
   {
@@ -160,27 +164,6 @@ export const passwordResets = pgTable(
   (t) => ({
     tokenIdx: index('password_resets_token_idx').on(t.token),
     expiresIdx: index('password_resets_expires_idx').on(t.expiresAt),
-  }),
-);
-
-export const pageViews = pgTable(
-  'page_views',
-  {
-    id: bigserial('id', { mode: 'number' }).primaryKey(),
-    path: varchar('path', { length: 512 }).notNull(),
-    referrer: varchar('referrer', { length: 512 }),
-    userAgent: text('user_agent'),
-    ipHash: varchar('ip_hash', { length: 64 }),
-    heroId: integer('hero_id').references(() => heroes.id, {
-      onDelete: 'set null',
-    }),
-    sessionId: varchar('session_id', { length: 64 }),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-  },
-  (t) => ({
-    createdIdx: index('page_views_created_idx').on(t.createdAt),
-    pathIdx: index('page_views_path_idx').on(t.path),
-    ipIdx: index('page_views_ip_idx').on(t.ipHash),
   }),
 );
 
@@ -235,12 +218,14 @@ export const submissions = pgTable(
       .notNull()
       .references(() => quests.id, { onDelete: 'cascade' }),
     repoUrl: varchar('repo_url', { length: 512 }).notNull(),
+    repoKey: varchar('repo_key', { length: 300 }),
     status: submissionStatusEnum('status').notNull().default('pending'),
     damageDealt: integer('damage_dealt').notNull().default(0),
     report: jsonb('report'),
     employerStatus: varchar('employer_status', { length: 32 }),
     employerNote: text('employer_note'),
     employerStatusAt: timestamp('employer_status_at'),
+    employerSeenAt: timestamp('employer_seen_at'),
     heroSeenAt: timestamp('hero_seen_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
@@ -251,6 +236,15 @@ export const submissions = pgTable(
       t.status,
     ),
     createdIdx: index('submissions_created_idx').on(t.createdAt),
+    repoKeyIdx: index('submissions_repo_key_idx').on(
+      t.heroId,
+      t.repoKey,
+      t.createdAt,
+    ),
+    employerSeenIdx: index('submissions_employer_seen_idx').on(
+      t.questId,
+      t.employerSeenAt,
+    ),
   }),
 );
 
@@ -344,7 +338,7 @@ export const githubAccounts = pgTable('github_accounts', {
 });
 
 // ============================================================
-// Rate limits
+// Rate limits и баны
 // ============================================================
 
 export const rateLimits = pgTable(
@@ -365,8 +359,22 @@ export const rateLimits = pgTable(
   }),
 );
 
+export const bannedIps = pgTable(
+  'banned_ips',
+  {
+    id: serial('id').primaryKey(),
+    ipHash: varchar('ip_hash', { length: 64 }).notNull().unique(),
+    reason: text('reason'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    expiresAt: timestamp('expires_at'),
+  },
+  (t) => ({
+    hashIdx: index('banned_ips_hash_idx').on(t.ipHash),
+  }),
+);
+
 // ============================================================
-// AI usage и кэш
+// AI
 // ============================================================
 
 export const aiUsage = pgTable(
@@ -446,6 +454,31 @@ export const cataSubmissions = pgTable('cata_submissions', {
   durationMs: integer('duration_ms').notNull().default(0),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
+
+// ============================================================
+// Метрика
+// ============================================================
+
+export const pageViews = pgTable(
+  'page_views',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    path: varchar('path', { length: 512 }).notNull(),
+    referrer: varchar('referrer', { length: 512 }),
+    userAgent: text('user_agent'),
+    ipHash: varchar('ip_hash', { length: 64 }),
+    heroId: integer('hero_id').references(() => heroes.id, {
+      onDelete: 'set null',
+    }),
+    sessionId: varchar('session_id', { length: 64 }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    createdIdx: index('page_views_created_idx').on(t.createdAt),
+    pathIdx: index('page_views_path_idx').on(t.path),
+    ipIdx: index('page_views_ip_idx').on(t.ipHash),
+  }),
+);
 
 // ============================================================
 // Типы

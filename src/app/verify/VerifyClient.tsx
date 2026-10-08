@@ -172,7 +172,6 @@ export function VerifyClient({
 
   return (
     <>
-      {/* ==================== ФОРМА ==================== */}
       <div className="glass rounded-2xl p-6 relative overflow-hidden">
         <div className="absolute -top-32 -right-32 w-72 h-72 rounded-full bg-amber-500/10 blur-[100px]" />
 
@@ -223,7 +222,6 @@ export function VerifyClient({
         </div>
       </div>
 
-      {/* ==================== ОЧЕРЕДЬ ==================== */}
       {loading && queuePosition !== null && (
         <div className="mt-6 glass rounded-2xl p-5 border-l-2 border-l-amber-500/60 relative overflow-hidden">
           <div className="absolute -top-20 -right-20 w-56 h-56 rounded-full bg-amber-500/10 blur-[80px]" />
@@ -243,7 +241,6 @@ export function VerifyClient({
         </div>
       )}
 
-      {/* ==================== ИНФО О ЖДЕНИИ ==================== */}
       {loading && queuePosition === null && queueWaitMs !== null && queueWaitMs > 5000 && (
         <div className="mt-6 glass rounded-2xl p-4 border-l-2 border-l-emerald-500/60">
           <div className="flex items-center gap-3 text-sm">
@@ -259,7 +256,6 @@ export function VerifyClient({
         </div>
       )}
 
-      {/* ==================== ПРОГРЕСС ==================== */}
       {loading && livePhases.length >= 0 && (
         <div className="mt-6 glass rounded-2xl p-6">
           <div className="flex items-center justify-between text-xs text-zinc-500 mb-4">
@@ -332,7 +328,6 @@ export function VerifyClient({
         </div>
       )}
 
-      {/* ==================== ТЕКУЩИЙ ПРОГРЕСС ==================== */}
       {loading && livePhases.length > 0 && (
         <div className="mt-6 space-y-3">
           <h2 className="text-sm font-mono tracking-[0.2em] text-zinc-500 flex items-center gap-3">
@@ -358,7 +353,6 @@ export function VerifyClient({
         </div>
       )}
 
-      {/* ==================== ИТОГОВЫЙ ОТЧЁТ ==================== */}
       {report && (
         <div className="mt-6 space-y-4">
           <div

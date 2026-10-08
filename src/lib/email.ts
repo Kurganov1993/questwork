@@ -10,10 +10,6 @@ export type SendEmailInput = {
   text?: string;
 };
 
-/**
- * Отправляет письмо через Resend. Если ключа нет — пишет ссылку в лог.
- * Никогда не бросает.
- */
 export async function sendEmail(input: SendEmailInput): Promise<boolean> {
   if (!RESEND_API_KEY) {
     logger.warn('email.skipped', {
@@ -62,9 +58,6 @@ export async function sendEmail(input: SendEmailInput): Promise<boolean> {
   }
 }
 
-/**
- * Шаблон письма подтверждения email.
- */
 export function verificationEmailHtml(
   companyName: string,
   verifyUrl: string,
@@ -131,20 +124,16 @@ export function invitationEmailHtml(input: {
       <div style="font-size: 32px;">⚔️</div>
       <div style="font-size: 18px; font-weight: 700; letter-spacing: 2px; margin-top: 8px; color: #fbbf24;">QUESTWORK</div>
     </div>
-
     <div style="text-align: center; margin-bottom: 20px;">
       <div style="font-size: 40px; margin-bottom: 8px;">${meta.emoji}</div>
       <div style="display: inline-block; padding: 6px 14px; background: ${meta.color}22; color: ${meta.color}; border-radius: 8px; font-size: 13px; font-weight: 600;">
         ${meta.label}
       </div>
     </div>
-
     <h1 style="font-size: 22px; margin: 16px 0 12px; text-align: center;">Привет, ${heroNickname}!</h1>
-
     <p style="color: #a1a1aa; line-height: 1.6; margin: 0 0 20px; text-align: center;">
       Компания <strong style="color: #e5e5e5;">${companyName}</strong> отметила твою сдачу квеста <strong style="color: #e5e5e5;">«${questTitle}»</strong>.
     </p>
-
     ${
       note
         ? `<div style="background: #0a0a0a; border-left: 3px solid ${meta.color}; padding: 12px 16px; margin: 16px 0; border-radius: 6px;">
@@ -153,18 +142,15 @@ export function invitationEmailHtml(input: {
            </div>`
         : ''
     }
-
     <div style="text-align: center; margin: 28px 0;">
       <a href="${invitationsUrl}" style="display: inline-block; padding: 14px 28px; background: #fbbf24; color: #000; text-decoration: none; font-weight: 600; border-radius: 10px;">
         Открыть приглашение →
       </a>
     </div>
-
     <p style="color: #71717a; font-size: 12px; text-align: center; margin: 20px 0 0;">
       Все решения работодателей: <a href="${invitationsUrl}" style="color: #a1a1aa;">${invitationsUrl}</a><br>
       Квест: <a href="${questUrl}" style="color: #a1a1aa;">${questUrl}</a>
     </p>
-
     <div style="text-align: center; margin-top: 24px; padding-top: 20px; border-top: 1px solid #27272a;">
       <a href="${baseUrl}/hero/settings" style="color: #71717a; font-size: 11px; text-decoration: underline;">
         Отключить уведомления
@@ -208,6 +194,85 @@ export function resetPasswordEmailHtml(input: {
     </p>
     <p style="color: #71717a; font-size: 12px; margin: 16px 0 0;">
       Ссылка действует 1 час.
+    </p>
+  </div>
+</body>
+</html>
+  `.trim();
+}
+
+export function submissionEmailHtml(input: {
+  companyName: string;
+  heroNickname: string;
+  questTitle: string;
+  questSlug: string;
+  status: 'victory' | 'defeat';
+  damageDealt: number;
+  bossMaxHp: number;
+  baseUrl: string;
+}): string {
+  const {
+    companyName,
+    heroNickname,
+    questTitle,
+    questSlug,
+    status,
+    damageDealt,
+    bossMaxHp,
+    baseUrl,
+  } = input;
+
+  const victory = status === 'victory';
+  const pct = Math.round((damageDealt / bossMaxHp) * 100);
+  const color = victory ? '#10b981' : '#ef4444';
+  const label = victory ? 'Победа' : 'Поражение';
+  const emoji = victory ? '🏆' : '⚔️';
+
+  const submissionUrl = `${baseUrl}/employer/quests`;
+  const publicProfileUrl = `${baseUrl}/u/${heroNickname}`;
+
+  return `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 40px 20px;">
+  <div style="max-width: 500px; margin: 0 auto; background: #18181b; border: 1px solid #27272a; border-radius: 16px; padding: 32px;">
+    <div style="text-align: center; margin-bottom: 24px;">
+      <div style="font-size: 32px;">${emoji}</div>
+      <div style="font-size: 18px; font-weight: 700; letter-spacing: 2px; margin-top: 8px; color: #fbbf24;">QUESTWORK</div>
+    </div>
+    <div style="text-align: center; margin-bottom: 20px;">
+      <div style="display: inline-block; padding: 6px 14px; background: ${color}22; color: ${color}; border-radius: 8px; font-size: 13px; font-weight: 600;">
+        ${label} · ${pct}% урона
+      </div>
+    </div>
+    <h1 style="font-size: 22px; margin: 16px 0 12px; text-align: center;">Новая сдача</h1>
+    <p style="color: #a1a1aa; line-height: 1.6; margin: 0 0 20px; text-align: center;">
+      <strong style="color: #e5e5e5;">${heroNickname}</strong> сдал квест <strong style="color: #e5e5e5;">«${questTitle}»</strong> компании ${companyName}.
+    </p>
+    <div style="background: #0a0a0a; border-radius: 8px; padding: 16px; margin: 20px 0;">
+      <table style="width: 100%; font-size: 14px;">
+        <tr>
+          <td style="color: #71717a; padding: 4px 0;">Результат</td>
+          <td style="color: ${color}; text-align: right; font-weight: 600;">${label}</td>
+        </tr>
+        <tr>
+          <td style="color: #71717a; padding: 4px 0;">Урон</td>
+          <td style="color: #e5e5e5; text-align: right; font-family: monospace;">${damageDealt} / ${bossMaxHp}</td>
+        </tr>
+        <tr>
+          <td style="color: #71717a; padding: 4px 0;">Герой</td>
+          <td style="text-align: right;"><a href="${publicProfileUrl}" style="color: #a78bfa;">${heroNickname}</a></td>
+        </tr>
+      </table>
+    </div>
+    <div style="text-align: center; margin: 28px 0;">
+      <a href="${submissionUrl}" style="display: inline-block; padding: 14px 28px; background: #fbbf24; color: #000; text-decoration: none; font-weight: 600; border-radius: 10px;">
+        Открыть кабинет →
+      </a>
+    </div>
+    <p style="color: #71717a; font-size: 12px; text-align: center; margin: 20px 0 0;">
+      Квест: <a href="${baseUrl}/quests/${questSlug}" style="color: #a1a1aa;">${baseUrl}/quests/${questSlug}</a>
     </p>
   </div>
 </body>

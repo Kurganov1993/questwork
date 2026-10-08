@@ -17,6 +17,7 @@ import { LootCard } from '@/components/LootCard';
 import { AchievementCard } from '@/components/AchievementCard';
 import { HeroBackground } from '@/components/home/HeroBackground';
 import { CopyLinkButton } from '@/components/CopyLinkButton';
+import { checkPublicRateLimit } from '@/lib/public-rate-limit';
 import type { LootItem, EarnedAchievementItem } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -45,6 +46,21 @@ export default async function PublicHeroPage({
   params: Promise<{ nickname: string }>;
 }) {
   const { nickname } = await params;
+
+  const allowed = await checkPublicRateLimit('publicProfile');
+  if (!allowed) {
+    return (
+      <main className="min-h-screen bg-zinc-950 text-zinc-100 grid place-items-center px-6">
+        <div className="max-w-md text-center">
+          <div className="text-6xl mb-4">🐢</div>
+          <h1 className="text-2xl font-bold mb-3">Слишком много запросов</h1>
+          <p className="text-zinc-400 mb-6">
+            Попробуй обновить страницу через несколько минут.
+          </p>
+        </div>
+      </main>
+    );
+  }
 
   let hero: typeof heroes.$inferSelect | undefined;
   try {
@@ -178,7 +194,6 @@ export default async function PublicHeroPage({
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      {/* ==================== HERO ==================== */}
       <section className="relative overflow-hidden">
         <HeroBackground />
 
@@ -193,12 +208,10 @@ export default async function PublicHeroPage({
             <CopyLinkButton />
           </div>
 
-          {/* Карточка героя */}
           <div className="glass rounded-3xl p-7 relative overflow-hidden">
             <div className="absolute -top-32 -right-32 w-80 h-80 rounded-full bg-amber-500/15 blur-[100px]" />
 
             <div className="relative flex flex-col sm:flex-row items-start gap-6">
-              {/* Аватар класса */}
               <div className="shrink-0">
                 <div className="w-24 h-24 rounded-full bg-gradient-to-br from-amber-500/30 to-amber-500/5 border border-amber-500/40 grid place-items-center text-5xl drop-shadow-[0_0_25px_rgba(251,191,36,0.4)]">
                   {cls?.icon ?? '🧙'}
@@ -216,7 +229,6 @@ export default async function PublicHeroPage({
                   В гильдии с {registeredAt}
                 </div>
 
-                {/* Основные статы */}
                 <div className="flex flex-wrap gap-x-6 gap-y-3">
                   <StatCell
                     label="Уровень"
@@ -249,7 +261,6 @@ export default async function PublicHeroPage({
               </div>
             </div>
 
-            {/* Дополнительная сетка статов */}
             <div className="relative grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-white/5">
               <MiniStat
                 label="Всего заходов"
@@ -277,7 +288,6 @@ export default async function PublicHeroPage({
             </div>
           </div>
 
-          {/* CTA для работодателей */}
           {isPortfolioReady && (
             <div className="mt-5 glass rounded-2xl p-5 relative overflow-hidden">
               <div className="absolute -top-20 -left-20 w-64 h-64 rounded-full bg-violet-500/15 blur-[80px]" />
@@ -308,7 +318,6 @@ export default async function PublicHeroPage({
         </div>
       </section>
 
-      {/* ==================== АРТЕФАКТЫ ==================== */}
       <section className="relative max-w-4xl mx-auto px-6 pb-10">
         <SectionLabel>АРТЕФАКТЫ · {myArtifacts.length}</SectionLabel>
 
@@ -340,7 +349,6 @@ export default async function PublicHeroPage({
         )}
       </section>
 
-      {/* ==================== ДОСТИЖЕНИЯ ==================== */}
       <section className="relative max-w-4xl mx-auto px-6 pb-10">
         <SectionLabel>ДОСТИЖЕНИЯ · {myAchievements.length}</SectionLabel>
 
@@ -372,11 +380,8 @@ export default async function PublicHeroPage({
         )}
       </section>
 
-      {/* ==================== ИСТОРИЯ ПОХОДОВ ==================== */}
       <section className="relative max-w-4xl mx-auto px-6 pb-20">
-        <SectionLabel>
-          ИСТОРИЯ ПОХОДОВ · {subs.length}
-        </SectionLabel>
+        <SectionLabel>ИСТОРИЯ ПОХОДОВ · {subs.length}</SectionLabel>
 
         {subs.length === 0 ? (
           <EmptyBlock
@@ -391,6 +396,9 @@ export default async function PublicHeroPage({
                 (s.damageDealt / (s.bossMaxHp || 110)) * 100,
               );
               const victory = s.status === 'victory';
+              const shortUrl = s.repoUrl
+                .replace(/^https?:\/\/(www\.)?/, '')
+                .slice(0, 55);
 
               return (
                 <div
@@ -445,9 +453,11 @@ export default async function PublicHeroPage({
                         href={s.repoUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs text-zinc-500 font-mono truncate block hover:text-amber-400 transition"
+                        className="text-xs text-zinc-600 font-mono truncate block hover:text-amber-400 transition"
+                        title={s.repoUrl}
                       >
-                        {s.repoUrl}
+                        {shortUrl}
+                        {s.repoUrl.length > 60 ? '…' : ''}
                       </a>
 
                       <div className="text-xs text-zinc-600 mt-1">
@@ -455,7 +465,6 @@ export default async function PublicHeroPage({
                       </div>
                     </div>
 
-                    {/* Прогресс урона */}
                     <div className="shrink-0 w-24 sm:w-32">
                       <div className="text-xs text-zinc-500 mb-1 text-right font-mono">
                         {s.damageDealt} / {s.bossMaxHp}
@@ -479,7 +488,6 @@ export default async function PublicHeroPage({
         )}
       </section>
 
-      {/* ==================== FOOTER ==================== */}
       <footer className="border-t border-white/5 py-10">
         <div className="max-w-4xl mx-auto px-6 text-center">
           <div className="flex items-center justify-center gap-3 mb-3">
@@ -518,8 +526,6 @@ export default async function PublicHeroPage({
     </main>
   );
 }
-
-// ==================== ХЕЛПЕРЫ ====================
 
 function StatCell({
   label,

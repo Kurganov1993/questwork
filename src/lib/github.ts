@@ -1,3 +1,5 @@
+import { logger } from './logger';
+
 const GH_API = 'https://api.github.com';
 
 export class GitHubError extends Error {
@@ -153,9 +155,6 @@ export const getCommits = (owner: string, repo: string, perPage = 100) =>
 export const getRootContents = (owner: string, repo: string) =>
   gh<GhContentItem[]>(`/repos/${owner}/${repo}/contents/`);
 
-/**
- * Полное дерево репозитория ОДНИМ запросом через Git Trees API.
- */
 export async function listTree(
   owner: string,
   repo: string,
@@ -177,7 +176,9 @@ export async function listTree(
       )}?recursive=1`,
     );
   } catch (e) {
-    console.error('[listTree] trees API failed:', (e as Error).message);
+    logger.error('github.listTree.failed', {
+      message: (e as Error).message,
+    });
     return [];
   }
 
@@ -247,10 +248,6 @@ export async function getFileText(
   }
 }
 
-/**
- * Пакетная загрузка файлов с ограничением параллелизма.
- * Возвращает карту path → content. Ошибки отдельных файлов игнорируются.
- */
 export async function getFilesBatch(
   owner: string,
   repo: string,
@@ -268,7 +265,7 @@ export async function getFilesBatch(
         const text = await getFileText(owner, repo, path);
         if (text !== null) result.set(path, text);
       } catch {
-        // молча пропускаем
+        /* пропускаем */
       }
     }
   }

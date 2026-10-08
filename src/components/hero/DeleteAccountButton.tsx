@@ -26,6 +26,10 @@ export function DeleteAccountButton() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password, confirmText }),
       });
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
       const data = await res.json();
       if (!data.ok) {
         setError(data.error ?? 'Не удалось удалить аккаунт');

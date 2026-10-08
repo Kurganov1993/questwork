@@ -26,6 +26,9 @@ const PRESETS: Record<string, RateLimitConfig> = {
   githubRepos: { bucket: 'github-repos', limit: 60, windowSec: 3600 },
   notifications: { bucket: 'notifications', limit: 120, windowSec: 3600 },
   accountDelete: { bucket: 'account-delete', limit: 3, windowSec: 3600 },
+  repoRepeat: { bucket: 'repo-repeat', limit: 3, windowSec: 86400 },
+  publicProfile: { bucket: 'public-profile', limit: 300, windowSec: 3600 },
+  heroExport: { bucket: 'hero-export', limit: 5, windowSec: 3600 },
 };
 
 let lastCleanup = 0;
@@ -57,6 +60,21 @@ export async function checkRateLimit(
       resetInSec: 0,
       limit: 999,
     };
+  }
+
+  // Проверяем бан для IP-идентификаторов
+  if (identifier.startsWith('ip:')) {
+    const ip = identifier.slice(3);
+    const { isIpBanned } = await import('./ban');
+    const banned = await isIpBanned(ip);
+    if (banned) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetInSec: 3600,
+        limit: 0,
+      };
+    }
   }
 
   void maybeCleanup();
