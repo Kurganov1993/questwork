@@ -39,7 +39,6 @@ export default async function AdminPage() {
     recentHeroes,
     dailyVictories,
   ] = await Promise.all([
-    // Герои
     withRetry(
       () =>
         db
@@ -52,7 +51,6 @@ export default async function AdminPage() {
       { label: 'admin:heroes-stats' },
     ).then((r) => r[0]),
 
-    // Работодатели
     withRetry(
       () =>
         db
@@ -65,7 +63,6 @@ export default async function AdminPage() {
       { label: 'admin:customers-stats' },
     ).then((r) => r[0]),
 
-    // Сдачи
     withRetry(
       () =>
         db
@@ -80,7 +77,6 @@ export default async function AdminPage() {
       { label: 'admin:submissions-stats' },
     ).then((r) => r[0]),
 
-    // AI за сегодня
     withRetry(
       () =>
         db
@@ -96,7 +92,6 @@ export default async function AdminPage() {
       { label: 'admin:ai-today' },
     ).then((r) => r[0]),
 
-    // AI за 7 дней
     withRetry(
       () =>
         db
@@ -109,7 +104,6 @@ export default async function AdminPage() {
       { label: 'admin:ai-7d' },
     ).then((r) => r[0]),
 
-    // AI за 30 дней
     withRetry(
       () =>
         db
@@ -122,7 +116,6 @@ export default async function AdminPage() {
       { label: 'admin:ai-30d' },
     ).then((r) => r[0]),
 
-    // AI по моделям за 30 дней
     withRetry(
       () =>
         db
@@ -139,7 +132,6 @@ export default async function AdminPage() {
       { label: 'admin:ai-by-model' },
     ).catch(() => []),
 
-    // Топ квестов по числу сдач
     withRetry(
       () =>
         db
@@ -158,7 +150,6 @@ export default async function AdminPage() {
       { label: 'admin:top-quests' },
     ).catch(() => []),
 
-    // Последние 15 сдач
     withRetry(
       () =>
         db
@@ -180,7 +171,6 @@ export default async function AdminPage() {
       { label: 'admin:recent-subs' },
     ).catch(() => []),
 
-    // Последние 10 героев
     withRetry(
       () =>
         db
@@ -197,7 +187,6 @@ export default async function AdminPage() {
       { label: 'admin:recent-heroes' },
     ).catch(() => []),
 
-    // Победы по дням за 14 дней
     withRetry(
       () =>
         db
@@ -253,10 +242,7 @@ export default async function AdminPage() {
   const ai30dCalls = Number(ai30d?.calls ?? 0);
   const ai30dCost = Number(ai30d?.costUsd ?? 0);
 
-  // Средняя стоимость запроса
   const avgCost = ai30dCalls > 0 ? ai30dCost / ai30dCalls : 0;
-
-  // Прогноз на 30 дней по текущему темпу
   const dailyAvgCost = ai30dCost / 30;
   const forecastMonth = dailyAvgCost * 30;
 
@@ -291,6 +277,12 @@ export default async function AdminPage() {
             </div>
 
             <div className="flex gap-3 flex-wrap">
+              <Link
+                href="/admin/analytics"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg glass text-sm text-zinc-300 hover:text-amber-400 transition"
+              >
+                📊 Метрика
+              </Link>
               <StatusPill
                 label="Docker"
                 ok={dockerOk}
@@ -306,7 +298,6 @@ export default async function AdminPage() {
             </div>
           </div>
 
-          {/* Верхняя сводка */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
             <Metric
               icon="🧙"
@@ -335,7 +326,6 @@ export default async function AdminPage() {
             />
           </div>
 
-          {/* AI блок */}
           <div className="grid sm:grid-cols-3 gap-3 mb-6">
             <Metric
               icon="💵"
@@ -358,9 +348,7 @@ export default async function AdminPage() {
             />
           </div>
 
-          {/* Двухколоночная сетка */}
           <div className="grid lg:grid-cols-2 gap-6 mb-6">
-            {/* График побед */}
             <div className="glass rounded-2xl p-6">
               <h2 className="text-sm font-mono tracking-[0.2em] text-zinc-500 mb-5">
                 АКТИВНОСТЬ · 14 ДНЕЙ
@@ -389,7 +377,11 @@ export default async function AdminPage() {
                         >
                           <div
                             className="absolute bottom-0 left-0 right-0 rounded-t bg-gradient-to-t from-emerald-500/80 to-emerald-400"
-                            style={{ height: `${total > 0 ? (winsH / totalH) * 100 : 0}%` }}
+                            style={{
+                              height: `${
+                                total > 0 ? (winsH / totalH) * 100 : 0
+                              }%`,
+                            }}
                           />
                         </div>
                       </div>
@@ -404,7 +396,6 @@ export default async function AdminPage() {
               </div>
             </div>
 
-            {/* Топ квестов */}
             <div className="glass rounded-2xl p-6">
               <h2 className="text-sm font-mono tracking-[0.2em] text-zinc-500 mb-5">
                 ТОП КВЕСТОВ
@@ -450,7 +441,6 @@ export default async function AdminPage() {
             </div>
           </div>
 
-          {/* AI по моделям */}
           {aiByModel.length > 0 && (
             <div className="glass rounded-2xl p-6 mb-6">
               <h2 className="text-sm font-mono tracking-[0.2em] text-zinc-500 mb-5">
@@ -474,9 +464,7 @@ export default async function AdminPage() {
             </div>
           )}
 
-          {/* Двухколоночная сетка: сдачи и герои */}
           <div className="grid lg:grid-cols-2 gap-6">
-            {/* Последние сдачи */}
             <div className="glass rounded-2xl p-6">
               <h2 className="text-sm font-mono tracking-[0.2em] text-zinc-500 mb-5">
                 ПОСЛЕДНИЕ СДАЧИ
@@ -534,7 +522,6 @@ export default async function AdminPage() {
               )}
             </div>
 
-            {/* Последние герои */}
             <div className="glass rounded-2xl p-6">
               <h2 className="text-sm font-mono tracking-[0.2em] text-zinc-500 mb-5">
                 НОВЫЕ ГЕРОИ
@@ -576,8 +563,8 @@ export default async function AdminPage() {
           </div>
 
           <div className="mt-8 text-xs text-zinc-600 text-center">
-            Данные обновлены в{' '}
-            {new Date().toLocaleTimeString('ru-RU')} · обнови страницу
+            Данные обновлены в {new Date().toLocaleTimeString('ru-RU')} ·
+            обнови страницу
           </div>
         </div>
       </section>

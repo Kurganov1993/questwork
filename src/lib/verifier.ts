@@ -17,6 +17,7 @@ import { runTestCheck } from './docker/test-runner';
 import { isDockerAvailable } from './docker/client';
 import { runAIReview } from './ai/review';
 import { getProviderInfo } from './ai/client';
+import { checkAiQuota } from './ai/quota';
 
 const MAX_REPO_SIZE_KB = 100 * 1024; // 100 MB
 
@@ -48,6 +49,8 @@ type Ctx = {
   semgrepFindings?: SemgrepFinding[];
   workflowTexts?: Record<string, string>;
   dockerAvailable?: boolean;
+  heroId?: number;
+  questId?: number;
 };
 
 type CheckResult = {
@@ -511,10 +514,31 @@ const CHECKS: Record<string, CheckFn> = {
       };
     }
 
+    // === Проверка дневной квоты AI ===
+    if (ctx.heroId) {
+      const quota = await checkAiQuota(ctx.heroId);
+      if (!quota.allowed) {
+        const fb = await CHECKS.review(ctx);
+        return {
+          passed: fb.passed,
+          logs: [
+            `⚠ Дневной лимит AI исчерпан: $${quota.spentUsd.toFixed(4)} из $${quota.limitUsd.toFixed(2)}`,
+            '⚠ Сработала эвристика (проверка по файлам)',
+            ...fb.logs,
+          ],
+          details: {
+            metrics: {
+              aiQuotaSpentUsd: Number(quota.spentUsd.toFixed(4)),
+              aiQuotaLimitUsd: quota.limitUsd,
+            },
+          },
+        };
+      }
+    }
+
     const staticErrors = ctx.staticResult?.score.errors ?? 0;
     const staticWarnings = ctx.staticResult?.score.warnings ?? 0;
 
-    // Ключ кэша: репо + время последнего пуша
     const cacheKey = `${ctx.owner}/${ctx.repo}@${ctx.repoMeta.pushed_at}`;
 
     const res = await runAIReview(
@@ -525,6 +549,8 @@ const CHECKS: Record<string, CheckFn> = {
       ctx.packageJson,
       staticErrors + staticWarnings,
       cacheKey,
+      ctx.heroId,
+      ctx.questId,
     );
 
     if (!res.ok) {
@@ -698,6 +724,7 @@ export async function runVerification(
   phases: QuestPhase[],
   victoryThreshold: number,
   onPhase?: OnPhaseCallback,
+  context?: { heroId?: number; questId?: number },
 ): Promise<VerifyReport> {
   const sorted = [...phases].sort((a, b) => a.phaseOrder - b.phaseOrder);
   const bossMaxHpTotal = sorted.reduce((s, p) => s + p.maxHp, 0) || 100;
@@ -816,6 +843,8 @@ export async function runVerification(
     readme,
     packageJson,
     tree,
+    heroId: context?.heroId,
+    questId: context?.questId,
   };
 
   const results: PhaseResult[] = [];

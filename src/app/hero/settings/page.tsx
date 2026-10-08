@@ -69,6 +69,22 @@ export default async function HeroSettingsPage({
             initialVerified={!!row?.emailVerifiedAt}
             initialNotify={row?.notifyByEmail ?? true}
           />
+
+          <div className="glass rounded-2xl p-6 mt-4">
+            <div className="font-semibold mb-1">Экспорт данных</div>
+            <div className="text-xs text-zinc-500 mb-4">
+              Скачай все свои данные в формате JSON: профиль, историю сдач,
+              артефакты, достижения. Соответствует праву на доступ к своим
+              персональным данным (152-ФЗ, ст. 14).
+            </div>
+            <a
+              href="/api/hero/export"
+              className="inline-block px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-zinc-300 text-sm hover:border-amber-500/60 hover:text-amber-400 transition"
+              download
+            >
+              📥 Скачать мои данные (JSON)
+            </a>
+          </div>
         </div>
       </section>
     </main>

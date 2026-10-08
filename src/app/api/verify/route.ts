@@ -46,7 +46,6 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // === Rate limit ===
         const rl = await checkRateLimit('verify', `hero:${hero.id}`);
         if (!rl.allowed) {
           send(controller, {
@@ -168,6 +167,7 @@ export async function POST(req: NextRequest) {
               details: phase.details,
             });
           },
+          { heroId: hero.id, questId: quest.id },
         );
 
         logger.info('verify.result', {

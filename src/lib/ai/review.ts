@@ -72,6 +72,8 @@ export async function runAIReview(
   packageJson: Record<string, unknown> | null,
   staticIssuesHint: number,
   cacheKey?: string,
+  heroId?: number,
+  questId?: number,
 ): Promise<AIReviewResult> {
   const info = getProviderInfo();
   if (!info.ready) {
@@ -160,6 +162,8 @@ ${context.files
     });
 
     await recordAiUsage({
+      heroId,
+      questId,
       provider: result.provider,
       model: result.model,
       tokensIn: result.tokensIn,
@@ -224,6 +228,8 @@ ${context.files
     const errorMessage = (e as Error).message.slice(0, 300);
 
     await recordAiUsage({
+      heroId,
+      questId,
       provider: info.provider,
       model: info.model,
       durationMs,

@@ -4,6 +4,7 @@ import { db } from '@/db';
 import { isDockerAvailable } from '@/lib/docker/client';
 import { getProviderInfo } from '@/lib/ai/client';
 import { getAiUsageStats } from '@/lib/ai/usage';
+import { getBuildQueueStats } from '@/lib/build-lock';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -56,8 +57,6 @@ async function withTimeout<T>(
     ),
   ]);
 }
-
-
 
 export async function GET(req: Request) {
   maybeCleanup();
@@ -148,6 +147,7 @@ export async function GET(req: Request) {
       timestamp: new Date().toISOString(),
       version: process.env.NEXT_PUBLIC_APP_VERSION ?? 'dev',
       checks,
+      queue: getBuildQueueStats(),
       ai: aiStats
         ? {
             today: {

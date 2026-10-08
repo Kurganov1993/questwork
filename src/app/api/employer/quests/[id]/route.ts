@@ -42,7 +42,7 @@ export async function PATCH(
     }
 
     const rl = await checkRateLimit(
-      'submissionStatus',
+      'employerCreate',
       `customer:${customer.id}`,
     );
     if (!rl.allowed) return rateLimitResponse(rl);
@@ -80,6 +80,12 @@ export async function PATCH(
           { status: 400 },
         );
       }
+      if (t.length > 128) {
+        return NextResponse.json(
+          { ok: false, error: 'Название максимум 128 символов' },
+          { status: 400 },
+        );
+      }
       update.title = t;
     }
 
@@ -88,6 +94,12 @@ export async function PATCH(
       if (d.length < 10) {
         return NextResponse.json(
           { ok: false, error: 'Описание минимум 10 символов' },
+          { status: 400 },
+        );
+      }
+      if (d.length > 5000) {
+        return NextResponse.json(
+          { ok: false, error: 'Описание максимум 5000 символов' },
           { status: 400 },
         );
       }
@@ -103,6 +115,12 @@ export async function PATCH(
       if (b.length < 2) {
         return NextResponse.json(
           { ok: false, error: 'Имя босса минимум 2 символа' },
+          { status: 400 },
+        );
+      }
+      if (b.length > 128) {
+        return NextResponse.json(
+          { ok: false, error: 'Имя босса максимум 128 символов' },
           { status: 400 },
         );
       }
@@ -155,6 +173,18 @@ export async function PATCH(
             { status: 400 },
           );
         }
+        if (p.name.trim().length > 128) {
+          return NextResponse.json(
+            { ok: false, error: 'Название фазы максимум 128 символов' },
+            { status: 400 },
+          );
+        }
+        if ((p.description ?? '').trim().length > 1000) {
+          return NextResponse.json(
+            { ok: false, error: 'Описание фазы максимум 1000 символов' },
+            { status: 400 },
+          );
+        }
         if (!validCheckTypes.has(p.checkType)) {
           return NextResponse.json(
             { ok: false, error: `Неизвестный тип: ${p.checkType}` },
@@ -164,6 +194,12 @@ export async function PATCH(
         if (!Number.isFinite(p.maxHp) || p.maxHp <= 0) {
           return NextResponse.json(
             { ok: false, error: 'maxHp должен быть > 0' },
+            { status: 400 },
+          );
+        }
+        if (p.maxHp > 500) {
+          return NextResponse.json(
+            { ok: false, error: 'HP фазы максимум 500' },
             { status: 400 },
           );
         }

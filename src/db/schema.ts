@@ -10,6 +10,7 @@ import {
   index,
   uniqueIndex,
   numeric,
+  bigserial,
   boolean,
 } from 'drizzle-orm/pg-core';
 
@@ -57,20 +58,27 @@ export const cataDifficultyEnum = pgEnum('cata_difficulty', [
 // Герои
 // ============================================================
 
-export const heroes = pgTable('heroes', {
-  id: serial('id').primaryKey(),
-  nickname: varchar('nickname', { length: 64 }).notNull().unique(),
-  passwordHash: varchar('password_hash', { length: 255 }),
-  heroClass: heroClassEnum('hero_class').notNull(),
-  level: integer('level').notNull().default(1),
-  xp: integer('xp').notNull().default(0),
-  gold: integer('gold').notNull().default(0),
-  email: varchar('email', { length: 255 }),
-  emailVerifiedAt: timestamp('email_verified_at'),
-  notifyByEmail: boolean('notify_by_email').notNull().default(true),
-  termsAcceptedAt: timestamp('terms_accepted_at'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-});
+export const heroes = pgTable(
+  'heroes',
+  {
+    id: serial('id').primaryKey(),
+    nickname: varchar('nickname', { length: 64 }).notNull().unique(),
+    passwordHash: varchar('password_hash', { length: 255 }),
+    heroClass: heroClassEnum('hero_class').notNull(),
+    level: integer('level').notNull().default(1),
+    xp: integer('xp').notNull().default(0),
+    gold: integer('gold').notNull().default(0),
+    email: varchar('email', { length: 255 }),
+    emailVerifiedAt: timestamp('email_verified_at'),
+    notifyByEmail: boolean('notify_by_email').notNull().default(true),
+    termsAcceptedAt: timestamp('terms_accepted_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    xpIdx: index('heroes_xp_idx').on(t.xp),
+    levelIdx: index('heroes_level_idx').on(t.level),
+  }),
+);
 
 export const sessions = pgTable(
   'sessions',
@@ -130,6 +138,49 @@ export const emailVerifications = pgTable(
   },
   (t) => ({
     customerIdx: index('email_verif_customer_idx').on(t.customerId),
+    expiresIdx: index('email_verifications_expires_idx').on(t.expiresAt),
+  }),
+);
+
+export const passwordResets = pgTable(
+  'password_resets',
+  {
+    id: serial('id').primaryKey(),
+    token: varchar('token', { length: 64 }).notNull().unique(),
+    heroId: integer('hero_id').references(() => heroes.id, {
+      onDelete: 'cascade',
+    }),
+    customerId: integer('customer_id').references(() => customers.id, {
+      onDelete: 'cascade',
+    }),
+    expiresAt: timestamp('expires_at').notNull(),
+    usedAt: timestamp('used_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    tokenIdx: index('password_resets_token_idx').on(t.token),
+    expiresIdx: index('password_resets_expires_idx').on(t.expiresAt),
+  }),
+);
+
+export const pageViews = pgTable(
+  'page_views',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    path: varchar('path', { length: 512 }).notNull(),
+    referrer: varchar('referrer', { length: 512 }),
+    userAgent: text('user_agent'),
+    ipHash: varchar('ip_hash', { length: 64 }),
+    heroId: integer('hero_id').references(() => heroes.id, {
+      onDelete: 'set null',
+    }),
+    sessionId: varchar('session_id', { length: 64 }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    createdIdx: index('page_views_created_idx').on(t.createdAt),
+    pathIdx: index('page_views_path_idx').on(t.path),
+    ipIdx: index('page_views_ip_idx').on(t.ipHash),
   }),
 );
 
@@ -173,24 +224,35 @@ export const bossPhases = pgTable('boss_phases', {
 // Сдачи
 // ============================================================
 
-export const submissions = pgTable('submissions', {
-  id: serial('id').primaryKey(),
-  heroId: integer('hero_id')
-    .notNull()
-    .references(() => heroes.id, { onDelete: 'cascade' }),
-  questId: integer('quest_id')
-    .notNull()
-    .references(() => quests.id, { onDelete: 'cascade' }),
-  repoUrl: varchar('repo_url', { length: 512 }).notNull(),
-  status: submissionStatusEnum('status').notNull().default('pending'),
-  damageDealt: integer('damage_dealt').notNull().default(0),
-  report: jsonb('report'),
-  employerStatus: varchar('employer_status', { length: 32 }),
-  employerNote: text('employer_note'),
-  employerStatusAt: timestamp('employer_status_at'),
-  heroSeenAt: timestamp('hero_seen_at'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-});
+export const submissions = pgTable(
+  'submissions',
+  {
+    id: serial('id').primaryKey(),
+    heroId: integer('hero_id')
+      .notNull()
+      .references(() => heroes.id, { onDelete: 'cascade' }),
+    questId: integer('quest_id')
+      .notNull()
+      .references(() => quests.id, { onDelete: 'cascade' }),
+    repoUrl: varchar('repo_url', { length: 512 }).notNull(),
+    status: submissionStatusEnum('status').notNull().default('pending'),
+    damageDealt: integer('damage_dealt').notNull().default(0),
+    report: jsonb('report'),
+    employerStatus: varchar('employer_status', { length: 32 }),
+    employerNote: text('employer_note'),
+    employerStatusAt: timestamp('employer_status_at'),
+    heroSeenAt: timestamp('hero_seen_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    heroQuestIdx: index('submissions_hero_quest_idx').on(t.heroId, t.questId),
+    questStatusIdx: index('submissions_quest_status_idx').on(
+      t.questId,
+      t.status,
+    ),
+    createdIdx: index('submissions_created_idx').on(t.createdAt),
+  }),
+);
 
 // ============================================================
 // Артефакты

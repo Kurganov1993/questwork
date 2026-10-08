@@ -96,7 +96,7 @@ export default async function HomePage() {
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      {/* ==================== HERO ==================== */}
+      {/* HERO */}
       <section className="relative overflow-hidden">
         <HeroBackground />
 
@@ -148,7 +148,6 @@ export default async function HomePage() {
             </MagneticButton>
           </div>
 
-          {/* Статистика платформы */}
           {stats.totalHeroes > 0 && (
             <div
               data-reveal
@@ -168,7 +167,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* ==================== ЖИВАЯ ЛЕНТА ==================== */}
+      {/* ЖИВАЯ ЛЕНТА */}
       {recentVictories.length > 0 && (
         <VictoryTicker
           victories={recentVictories.map((v) => ({
@@ -185,7 +184,7 @@ export default async function HomePage() {
         />
       )}
 
-      {/* ==================== КВЕСТЫ ==================== */}
+      {/* КВЕСТЫ */}
       <section className="relative max-w-4xl mx-auto px-6 py-20">
         <div data-reveal>
           <SectionHeader
@@ -218,7 +217,7 @@ export default async function HomePage() {
         )}
       </section>
 
-      {/* ==================== ЗАЛ СЛАВЫ ==================== */}
+      {/* ЗАЛ СЛАВЫ */}
       {topHeroes.length > 0 && (
         <section className="relative max-w-5xl mx-auto px-6 py-16">
           <div data-reveal>
@@ -244,7 +243,7 @@ export default async function HomePage() {
         </section>
       )}
 
-      {/* ==================== КОМУ ЭТО ==================== */}
+      {/* КОМУ ЭТО */}
       <section className="relative max-w-6xl mx-auto px-6 py-20">
         <div data-reveal>
           <SectionHeader title="КОМУ ЭТО НУЖНО" centered />
@@ -289,7 +288,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* ==================== КАК ЭТО РАБОТАЕТ ==================== */}
+      {/* КАК ЭТО РАБОТАЕТ */}
       <section className="relative max-w-6xl mx-auto px-6 py-20">
         <div data-reveal>
           <SectionHeader title="КАК ЭТО РАБОТАЕТ" centered />
@@ -342,7 +341,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* ==================== ФИНАЛЬНЫЙ CTA ==================== */}
+      {/* ФИНАЛЬНЫЙ CTA */}
       <section className="relative max-w-4xl mx-auto px-6 py-20">
         <div
           data-reveal
@@ -390,7 +389,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* ==================== FOOTER ==================== */}
+      {/* FOOTER */}
       <footer className="border-t border-white/5 py-10 mt-8">
         <div className="max-w-6xl mx-auto px-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
@@ -431,6 +430,14 @@ export default async function HomePage() {
           </div>
 
           <div className="w-full mt-6 pt-6 border-t border-white/5 flex flex-wrap gap-4 justify-center text-xs text-zinc-600">
+            <Link href="/about" className="hover:text-amber-400 transition">
+              О проекте
+            </Link>
+            <span className="text-zinc-700">·</span>
+            <Link href="/contact" className="hover:text-amber-400 transition">
+              Связаться
+            </Link>
+            <span className="text-zinc-700">·</span>
             <Link
               href="/legal/privacy"
               className="hover:text-amber-400 transition"
@@ -459,7 +466,6 @@ export default async function HomePage() {
         </div>
       </footer>
 
-      {/* ==================== GSAP-АНИМАЦИИ ==================== */}
       <HomeAnimations />
     </main>
   );

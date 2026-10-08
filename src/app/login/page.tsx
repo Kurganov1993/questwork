@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -10,6 +10,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('reset') === 'success') setSuccess(true);
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -43,6 +49,12 @@ export default function LoginPage() {
         </Link>
 
         <h1 className="text-3xl font-bold mt-6 mb-8">Вход</h1>
+
+        {success && (
+          <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-4 text-sm text-emerald-300 mb-6">
+            ✓ Пароль обновлён. Войди с новым паролем.
+          </div>
+        )}
 
         <form
           onSubmit={onSubmit}
@@ -85,6 +97,15 @@ export default function LoginPage() {
           >
             {loading ? 'Входим…' : 'Войти'}
           </button>
+
+          <div className="text-center text-xs">
+            <Link
+              href="/forgot-password"
+              className="text-zinc-500 hover:text-amber-400 transition"
+            >
+              Забыли пароль?
+            </Link>
+          </div>
 
           <div className="text-center text-sm text-zinc-500">
             Нет героя?{' '}

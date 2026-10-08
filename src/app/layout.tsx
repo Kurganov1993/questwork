@@ -7,6 +7,7 @@ import { SmoothScroll } from '@/components/animations/SmoothScroll';
 import { HeaderNav } from '@/components/layout/HeaderNav';
 import { BetaBanner } from '@/components/legal/BetaBanner';
 import { CookieBanner } from '@/components/legal/CookieBanner';
+import { AnalyticsTracker } from '@/components/analytics/AnalyticsTracker';
 
 const inter = Inter({ subsets: ['latin', 'cyrillic'] });
 
@@ -14,7 +15,9 @@ export const metadata: Metadata = {
   title: 'QuestWork — найм как рейд',
   description:
     'Прокачивай героя, проходи квесты, побеждай боссов. Проверка кода через Docker, ESLint и AI.',
-  metadataBase: new URL('https://questwork.app'),
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_APP_URL ?? 'https://questwork.app',
+  ),
   openGraph: {
     title: 'QuestWork — найм как рейд',
     description:
@@ -54,6 +57,7 @@ export default async function RootLayout({
           />
           {children}
           <CookieBanner />
+          <AnalyticsTracker />
         </SmoothScroll>
       </body>
     </html>

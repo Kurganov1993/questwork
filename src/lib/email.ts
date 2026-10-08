@@ -175,3 +175,42 @@ export function invitationEmailHtml(input: {
 </html>
   `.trim();
 }
+
+export function resetPasswordEmailHtml(input: {
+  name: string;
+  resetUrl: string;
+  isCustomer: boolean;
+}): string {
+  const { name, resetUrl, isCustomer } = input;
+  const role = isCustomer ? 'компании' : 'героя';
+
+  return `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 40px 20px;">
+  <div style="max-width: 500px; margin: 0 auto; background: #18181b; border: 1px solid #27272a; border-radius: 16px; padding: 32px;">
+    <div style="text-align: center; margin-bottom: 24px;">
+      <div style="font-size: 32px;">🔑</div>
+      <div style="font-size: 18px; font-weight: 700; letter-spacing: 2px; margin-top: 8px; color: #fbbf24;">QUESTWORK</div>
+    </div>
+    <h1 style="font-size: 22px; margin: 0 0 16px;">Сброс пароля</h1>
+    <p style="color: #a1a1aa; line-height: 1.6; margin: 0 0 24px;">
+      Привет, <strong style="color: #e5e5e5;">${name}</strong>. Кто-то запросил сброс пароля для аккаунта ${role} на QuestWork.
+      Если это были не вы — просто проигнорируйте это письмо, пароль останется прежним.
+    </p>
+    <a href="${resetUrl}" style="display: inline-block; padding: 14px 28px; background: #fbbf24; color: #000; text-decoration: none; font-weight: 600; border-radius: 10px;">
+      Сбросить пароль
+    </a>
+    <p style="color: #71717a; font-size: 12px; margin: 24px 0 0;">
+      Или скопируйте ссылку:<br>
+      <span style="color: #a1a1aa; word-break: break-all;">${resetUrl}</span>
+    </p>
+    <p style="color: #71717a; font-size: 12px; margin: 16px 0 0;">
+      Ссылка действует 1 час.
+    </p>
+  </div>
+</body>
+</html>
+  `.trim();
+}

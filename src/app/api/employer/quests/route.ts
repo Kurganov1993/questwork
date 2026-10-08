@@ -41,9 +41,7 @@ export async function POST(req: NextRequest) {
       'employerCreate',
       `customer:${customer.id}`,
     );
-    if (!rl.allowed) {
-      return rateLimitResponse(rl);
-    }
+    if (!rl.allowed) return rateLimitResponse(rl);
 
     const body = (await req.json()) as Body;
 
@@ -60,9 +58,16 @@ export async function POST(req: NextRequest) {
     );
     const phases = Array.isArray(body.phases) ? body.phases : [];
 
+    // === Ограничения длины ===
     if (title.length < 3) {
       return NextResponse.json(
         { ok: false, error: 'Название минимум 3 символа' },
+        { status: 400 },
+      );
+    }
+    if (title.length > 128) {
+      return NextResponse.json(
+        { ok: false, error: 'Название максимум 128 символов' },
         { status: 400 },
       );
     }
@@ -72,9 +77,21 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+    if (description.length > 5000) {
+      return NextResponse.json(
+        { ok: false, error: 'Описание максимум 5000 символов' },
+        { status: 400 },
+      );
+    }
     if (bossName.length < 2) {
       return NextResponse.json(
         { ok: false, error: 'Имя босса минимум 2 символа' },
+        { status: 400 },
+      );
+    }
+    if (bossName.length > 128) {
+      return NextResponse.json(
+        { ok: false, error: 'Имя босса максимум 128 символов' },
         { status: 400 },
       );
     }
@@ -93,6 +110,18 @@ export async function POST(req: NextRequest) {
           { status: 400 },
         );
       }
+      if (p.name.trim().length > 128) {
+        return NextResponse.json(
+          { ok: false, error: 'Название фазы максимум 128 символов' },
+          { status: 400 },
+        );
+      }
+      if ((p.description ?? '').trim().length > 1000) {
+        return NextResponse.json(
+          { ok: false, error: 'Описание фазы максимум 1000 символов' },
+          { status: 400 },
+        );
+      }
       if (!validCheckTypes.has(p.checkType)) {
         return NextResponse.json(
           { ok: false, error: `Неизвестный тип проверки: ${p.checkType}` },
@@ -102,6 +131,12 @@ export async function POST(req: NextRequest) {
       if (!Number.isFinite(p.maxHp) || p.maxHp <= 0) {
         return NextResponse.json(
           { ok: false, error: 'У каждой фазы должен быть maxHp > 0' },
+          { status: 400 },
+        );
+      }
+      if (p.maxHp > 500) {
+        return NextResponse.json(
+          { ok: false, error: 'HP фазы максимум 500' },
           { status: 400 },
         );
       }

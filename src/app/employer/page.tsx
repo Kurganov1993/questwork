@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { eq, desc, sql } from 'drizzle-orm';
+import { eq, desc, sql, and } from 'drizzle-orm';
 import { db } from '@/db';
 import { quests, submissions, customers } from '@/db/schema';
 import { getCurrentCustomer } from '@/lib/customer-auth';
@@ -150,14 +150,6 @@ export default async function EmployerDashboard({
   ];
 
   const isNewCompany = myQuests.length === 0 && totalSubmissions === 0;
-
-  function buildPageUrl(page: number) {
-    const params = new URLSearchParams();
-    if (filter !== 'all') params.set('status', filter);
-    if (page > 1) params.set('page', String(page));
-    const s = params.toString();
-    return s ? `/employer?${s}` : '/employer';
-  }
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -399,7 +391,9 @@ export default async function EmployerDashboard({
               <div className="flex items-center justify-center gap-2 mt-6">
                 {currentPage > 1 && (
                   <Link
-                    href={buildPageUrl(currentPage - 1)}
+                    href={`/employer?${
+                      filter !== 'all' ? `status=${filter}&` : ''
+                    }page=${currentPage - 1}`}
                     className="px-4 py-2 rounded-lg border border-white/10 text-sm text-zinc-300 hover:border-amber-500/60 transition"
                   >
                     ← Назад
@@ -412,7 +406,9 @@ export default async function EmployerDashboard({
 
                 {currentPage < totalPages && (
                   <Link
-                    href={buildPageUrl(currentPage + 1)}
+                    href={`/employer?${
+                      filter !== 'all' ? `status=${filter}&` : ''
+                    }page=${currentPage + 1}`}
                     className="px-4 py-2 rounded-lg border border-white/10 text-sm text-zinc-300 hover:border-amber-500/60 transition"
                   >
                     Вперёд →
