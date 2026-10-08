@@ -1,12 +1,17 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { db } from '@/db';
-import { quests, bossPhases, artifacts, customers, submissions, heroes } from '@/db/schema';
-import { withRetry } from '@/lib/db-retry';
+import {
+  quests,
+  bossPhases,
+  artifacts,
+  customers,
+  submissions,
+} from '@/db/schema';
+import { getCurrentHero } from '@/lib/auth';
 import { LootCard } from '@/components/LootCard';
 import { HeroBackground } from '@/components/home/HeroBackground';
-import { TiltCard } from '@/components/animations/TiltCard';
 import { HERO_CLASSES } from '@/lib/constants';
 import type { LootItem } from '@/lib/types';
 
@@ -30,7 +35,6 @@ export async function generateMetadata({
   };
 }
 
-// Иконки и русские подписи для checkType
 const CHECK_TYPE_META: Record<string, { icon: string; label: string }> = {
   repo_exists: { icon: '📁', label: 'Репозиторий' },
   readme: { icon: '📖', label: 'README' },
@@ -80,6 +84,8 @@ export default async function QuestPage({
 
   if (!quest || quest.status !== 'active') notFound();
 
+  const hero = await getCurrentHero();
+
   const phases = await db
     .select()
     .from(bossPhases)
@@ -103,93 +109,53 @@ export default async function QuestPage({
     customer = c ?? null;
   }
 
-  // ==================== Статистика прохождения ====================
-  let stats = {
-    total: 0,
-    victories: 0,
-    avgDamage: 0,
-    bestHero: null as {
-      nickname: string;
-      heroClass: string;
-      level: number;
-      damageDealt: number;
-    } | null,
-  };
+  // Прогресс героя по этому квесту
+  let lastSubmissionPhases: Record<number, boolean> = {};
+  let heroPassedCount = 0;
+  let heroHasWon = false;
 
-  try {
-    const [agg] = await withRetry(
-      () =>
-        db
-          .select({
-            total: sql<number>`count(*)::int`,
-            victories: sql<number>`count(*) filter (where ${submissions.status} = 'victory')::int`,
-            avgDamage: sql<number>`coalesce(avg(${submissions.damageDealt}), 0)::int`,
-          })
-          .from(submissions)
-          .where(eq(submissions.questId, quest.id)),
-      { label: 'quest:stats' },
-    );
+  if (hero) {
+    try {
+      const [lastSub] = await db
+        .select({
+          report: submissions.report,
+          status: submissions.status,
+        })
+        .from(submissions)
+        .where(
+          and(
+            eq(submissions.heroId, hero.id),
+            eq(submissions.questId, quest.id),
+            eq(submissions.status, 'victory'),
+          ),
+        )
+        .orderBy(desc(submissions.createdAt))
+        .limit(1);
 
-    stats.total = Number(agg?.total ?? 0);
-    stats.victories = Number(agg?.victories ?? 0);
-    stats.avgDamage = Number(agg?.avgDamage ?? 0);
-
-    const [best] = await withRetry(
-      () =>
-        db
-          .select({
-            nickname: heroes.nickname,
-            heroClass: heroes.heroClass,
-            level: heroes.level,
-            damageDealt: submissions.damageDealt,
-          })
-          .from(submissions)
-          .innerJoin(heroes, eq(heroes.id, submissions.heroId))
-          .where(
-            and(
-              eq(submissions.questId, quest.id),
-              eq(submissions.status, 'victory'),
-            ),
-          )
-          .orderBy(desc(submissions.damageDealt))
-          .limit(1),
-      { label: 'quest:best' },
-    );
-
-    stats.bestHero = best ?? null;
-  } catch (e) {
-    console.error('[quest] stats failed:', (e as Error).message);
-  }
-
-  // ==================== Похожие квесты ====================
-  let relatedQuests: (typeof quests.$inferSelect)[] = [];
-  try {
-    relatedQuests = await withRetry(
-      () =>
-        db
-          .select()
-          .from(quests)
-          .where(eq(quests.status, 'active'))
-          .orderBy(quests.difficulty)
-          .limit(5),
-      { label: 'quest:related' },
-    );
-    relatedQuests = relatedQuests.filter((q) => q.id !== quest.id).slice(0, 3);
-  } catch (e) {
-    console.error('[quest] related failed:', (e as Error).message);
+      if (lastSub?.report) {
+        const report = lastSub.report as {
+          phases?: Array<{ order: number; passed: boolean }>;
+        };
+        for (const p of report.phases ?? []) {
+          lastSubmissionPhases[p.order] = p.passed;
+          if (p.passed) heroPassedCount++;
+        }
+        heroHasWon = true;
+      }
+    } catch (e) {
+      console.error(
+        '[quest-detail] last submission failed:',
+        (e as Error).message,
+      );
+    }
   }
 
   const stars =
     '★'.repeat(quest.difficulty) +
     '☆'.repeat(Math.max(0, 5 - quest.difficulty));
 
-  const winRate =
-    stats.total > 0 ? Math.round((stats.victories / stats.total) * 100) : 0;
-  const avgDamagePct = Math.round((stats.avgDamage / quest.bossMaxHp) * 100);
-
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      {/* ==================== HERO ==================== */}
       <section className="relative overflow-hidden">
         <HeroBackground />
 
@@ -201,12 +167,10 @@ export default async function QuestPage({
             ← Все квесты
           </Link>
 
-          {/* Основная карточка */}
           <div className="mt-6 glass rounded-3xl p-8 relative overflow-hidden">
             <div className="absolute -top-32 -right-32 w-72 h-72 rounded-full bg-amber-500/15 blur-[100px]" />
 
             <div className="relative flex flex-col sm:flex-row items-start gap-6">
-              {/* Иконка квеста */}
               <div className="shrink-0 text-7xl leading-none drop-shadow-[0_0_30px_rgba(251,191,36,0.35)]">
                 {quest.icon}
               </div>
@@ -221,9 +185,9 @@ export default async function QuestPage({
                       от {customer.companyName}
                     </span>
                   )}
-                  {stats.victories > 0 && (
+                  {heroHasWon && (
                     <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-700/40">
-                      {stats.victories} побед
+                      ✔ пройден
                     </span>
                   )}
                 </div>
@@ -233,7 +197,6 @@ export default async function QuestPage({
                 </h1>
                 <p className="text-zinc-400 mb-5">{quest.description}</p>
 
-                {/* Метрики */}
                 <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-zinc-400">
                   <span className="inline-flex items-center gap-1.5">
                     <span>👑</span>
@@ -259,75 +222,39 @@ export default async function QuestPage({
               </div>
             </div>
 
-            {/* Большая CTA-кнопка */}
+            {heroHasWon && (
+              <div className="relative mt-6 flex items-center gap-3">
+                <div className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-500/60 to-emerald-400 transition-all"
+                    style={{
+                      width: `${
+                        (heroPassedCount / Math.max(1, phases.length)) * 100
+                      }%`,
+                    }}
+                  />
+                </div>
+                <span className="text-zinc-500 font-mono text-xs shrink-0">
+                  {heroPassedCount}/{phases.length} фаз
+                </span>
+              </div>
+            )}
+
             <Link
               href={`/verify?quest=${quest.slug}`}
               className="relative block text-center w-full mt-7 py-4 rounded-xl bg-amber-500 text-black font-semibold hover:bg-amber-400 transition shadow-[0_0_40px_-10px_rgba(251,191,36,0.6)] hover:shadow-[0_0_60px_-10px_rgba(251,191,36,0.9)] group"
             >
               <span className="inline-flex items-center gap-2">
-                ⚔️ Принять квест
+                ⚔️ {heroHasWon ? 'Пройти снова' : 'Принять квест'}
                 <span className="group-hover:translate-x-1 transition-transform">
                   →
                 </span>
               </span>
             </Link>
           </div>
-
-          {/* ==================== Живая статистика ==================== */}
-          {stats.total > 0 && (
-            <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <StatCard label="Попыток" value={String(stats.total)} icon="🎯" />
-              <StatCard
-                label="Побед"
-                value={String(stats.victories)}
-                icon="🏆"
-                accent
-              />
-              <StatCard label="Win rate" value={`${winRate}%`} icon="📊" />
-              <StatCard
-                label="Средний урон"
-                value={`${avgDamagePct}%`}
-                icon="⚡"
-              />
-            </div>
-          )}
         </div>
       </section>
 
-      {/* ==================== ЛУЧШИЙ ГЕРОЙ ==================== */}
-      {stats.bestHero && (
-        <section className="relative max-w-4xl mx-auto px-6 pb-10">
-          <div className="glass rounded-2xl p-5 flex items-center gap-4">
-            <div className="text-3xl">🥇</div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs text-zinc-500 tracking-widest mb-1">
-                ЛУЧШИЙ РЕЗУЛЬТАТ
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <Link
-                  href={`/u/${stats.bestHero.nickname}`}
-                  className="font-semibold hover:text-amber-400 transition"
-                >
-                  {HERO_CLASSES.find((c) => c.value === stats.bestHero!.heroClass)
-                    ?.icon ?? '🧙'}{' '}
-                  {stats.bestHero.nickname}
-                </Link>
-                <span className="text-xs text-zinc-500">
-                  ур. {stats.bestHero.level}
-                </span>
-                <span className="text-xs text-amber-400">
-                  {Math.round(
-                    (stats.bestHero.damageDealt / quest.bossMaxHp) * 100,
-                  )}
-                  % урона
-                </span>
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* ==================== НАГРАДА ЗА ПОБЕДУ ==================== */}
       {questArtifacts.length > 0 && (
         <section className="relative max-w-4xl mx-auto px-6 pb-10">
           <SectionLabel>НАГРАДА ЗА ПОБЕДУ</SectionLabel>
@@ -348,7 +275,6 @@ export default async function QuestPage({
         </section>
       )}
 
-      {/* ==================== ФАЗЫ БОССА ==================== */}
       <section className="relative max-w-4xl mx-auto px-6 pb-10">
         <SectionLabel>
           ФАЗЫ БОССА · {phases.length} · {quest.bossMaxHp} HP
@@ -368,16 +294,27 @@ export default async function QuestPage({
                 data-cascade-item
                 className="glass rounded-xl p-4 hover:bg-white/[0.03] transition relative overflow-hidden group"
               >
-                {/* Прогресс-полоска HP */}
                 <div
                   className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-amber-500/5 to-transparent"
                   style={{ width: `${hpPct}%` }}
                 />
 
                 <div className="relative flex items-start gap-4">
-                  <div className="text-xs font-mono text-zinc-600 w-6 pt-1 shrink-0">
-                    {String(idx + 1).padStart(2, '0')}
-                  </div>
+                  {heroHasWon ? (
+                    <div
+                      className={`shrink-0 w-6 h-6 rounded-full grid place-items-center text-xs font-bold mt-0.5 ${
+                        lastSubmissionPhases[p.phaseOrder]
+                          ? 'bg-emerald-500/20 text-emerald-400'
+                          : 'bg-red-500/20 text-red-400'
+                      }`}
+                    >
+                      {lastSubmissionPhases[p.phaseOrder] ? '✓' : '✗'}
+                    </div>
+                  ) : (
+                    <div className="text-xs font-mono text-zinc-600 w-6 pt-1 shrink-0">
+                      {String(idx + 1).padStart(2, '0')}
+                    </div>
+                  )}
 
                   <div className="text-2xl shrink-0">{meta.icon}</div>
 
@@ -403,7 +340,6 @@ export default async function QuestPage({
         </div>
       </section>
 
-      {/* ==================== КАК ПРОХОДИТЬ ==================== */}
       <section className="relative max-w-4xl mx-auto px-6 pb-10">
         <SectionLabel>КАК ПРОХОДИТЬ</SectionLabel>
 
@@ -425,7 +361,7 @@ export default async function QuestPage({
               num="3"
               icon="⚔️"
               title="Победи босса"
-              text={`Если урон ≥ ${quest.victoryThreshold}% от ${quest.bossMaxHp} HP — босс повержен, ты получаешь награды.`}
+              text={`Если урон ≥ ${quest.victoryThreshold}% от ${quest.bossMaxHp} HP — босс повержен.`}
             />
           </div>
 
@@ -439,94 +375,16 @@ export default async function QuestPage({
           </div>
         </div>
       </section>
-
-      {/* ==================== ПОХОЖИЕ КВЕСТЫ ==================== */}
-      {relatedQuests.length > 0 && (
-        <section className="relative max-w-4xl mx-auto px-6 pb-20">
-          <div className="flex items-center justify-between mb-4">
-            <SectionLabel noMargin>ДРУГИЕ КВЕСТЫ</SectionLabel>
-            <Link
-              href="/quests"
-              className="text-xs text-amber-400 hover:text-amber-300 transition"
-            >
-              все квесты →
-            </Link>
-          </div>
-
-          <div className="space-y-2">
-            {relatedQuests.map((q) => (
-              <Link
-                key={q.id}
-                href={`/quests/${q.slug}`}
-                className="glass rounded-xl p-4 flex items-center gap-4 hover:bg-white/[0.03] hover:border-amber-500/30 transition group"
-              >
-                <div className="text-3xl shrink-0">{q.icon}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate group-hover:text-amber-400 transition">
-                    {q.title}
-                  </div>
-                  <div className="text-xs text-zinc-500 truncate">
-                    👑 {q.bossName} · ❤️ {q.bossMaxHp} HP · ✨ {q.rewardXp} XP
-                  </div>
-                </div>
-                <div className="text-amber-400 text-sm shrink-0 opacity-60 group-hover:opacity-100 transition">
-                  →
-                </div>
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
     </main>
   );
 }
 
-// ==================== ХЕЛПЕРЫ ====================
-
-function SectionLabel({
-  children,
-  noMargin = false,
-}: {
-  children: React.ReactNode;
-  noMargin?: boolean;
-}) {
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <h2
-      className={`text-sm font-mono tracking-[0.2em] text-zinc-500 flex items-center gap-3 ${
-        noMargin ? '' : 'mb-4'
-      }`}
-    >
+    <h2 className="text-sm font-mono tracking-[0.2em] text-zinc-500 flex items-center gap-3 mb-4">
       <span className="h-px w-6 bg-gradient-to-r from-transparent to-amber-500/60" />
       {children}
     </h2>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  icon,
-  accent = false,
-}: {
-  label: string;
-  value: string;
-  icon: string;
-  accent?: boolean;
-}) {
-  return (
-    <div className="glass rounded-xl px-4 py-3">
-      <div className="flex items-center gap-2 text-xs text-zinc-500 mb-1">
-        <span>{icon}</span>
-        <span className="tracking-wide uppercase">{label}</span>
-      </div>
-      <div
-        className={`text-xl font-bold ${
-          accent ? 'text-gradient-amber' : 'text-zinc-100'
-        }`}
-      >
-        {value}
-      </div>
-    </div>
   );
 }
 

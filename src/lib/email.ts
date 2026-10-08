@@ -98,3 +98,80 @@ export function verificationEmailHtml(
 </html>
   `.trim();
 }
+
+export function invitationEmailHtml(input: {
+  heroNickname: string;
+  companyName: string;
+  questTitle: string;
+  questSlug: string;
+  status: 'shortlisted' | 'interview' | 'hired' | 'rejected';
+  note: string | null;
+  baseUrl: string;
+}): string {
+  const { heroNickname, companyName, questTitle, questSlug, status, note, baseUrl } = input;
+
+  const statusMap = {
+    shortlisted: { emoji: '📋', label: 'В шортлисте', color: '#3b82f6' },
+    interview: { emoji: '📞', label: 'Приглашают на интервью', color: '#fbbf24' },
+    hired: { emoji: '🎉', label: 'Наняли', color: '#10b981' },
+    rejected: { emoji: '📭', label: 'Отказ', color: '#ef4444' },
+  };
+
+  const meta = statusMap[status];
+  const questUrl = `${baseUrl}/quests/${questSlug}`;
+  const invitationsUrl = `${baseUrl}/hero/invitations`;
+
+  return `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 40px 20px;">
+  <div style="max-width: 500px; margin: 0 auto; background: #18181b; border: 1px solid #27272a; border-radius: 16px; padding: 32px;">
+    <div style="text-align: center; margin-bottom: 24px;">
+      <div style="font-size: 32px;">⚔️</div>
+      <div style="font-size: 18px; font-weight: 700; letter-spacing: 2px; margin-top: 8px; color: #fbbf24;">QUESTWORK</div>
+    </div>
+
+    <div style="text-align: center; margin-bottom: 20px;">
+      <div style="font-size: 40px; margin-bottom: 8px;">${meta.emoji}</div>
+      <div style="display: inline-block; padding: 6px 14px; background: ${meta.color}22; color: ${meta.color}; border-radius: 8px; font-size: 13px; font-weight: 600;">
+        ${meta.label}
+      </div>
+    </div>
+
+    <h1 style="font-size: 22px; margin: 16px 0 12px; text-align: center;">Привет, ${heroNickname}!</h1>
+
+    <p style="color: #a1a1aa; line-height: 1.6; margin: 0 0 20px; text-align: center;">
+      Компания <strong style="color: #e5e5e5;">${companyName}</strong> отметила твою сдачу квеста <strong style="color: #e5e5e5;">«${questTitle}»</strong>.
+    </p>
+
+    ${
+      note
+        ? `<div style="background: #0a0a0a; border-left: 3px solid ${meta.color}; padding: 12px 16px; margin: 16px 0; border-radius: 6px;">
+             <div style="color: #71717a; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">Заметка от работодателя</div>
+             <div style="color: #e5e5e5; font-style: italic;">«${note}»</div>
+           </div>`
+        : ''
+    }
+
+    <div style="text-align: center; margin: 28px 0;">
+      <a href="${invitationsUrl}" style="display: inline-block; padding: 14px 28px; background: #fbbf24; color: #000; text-decoration: none; font-weight: 600; border-radius: 10px;">
+        Открыть приглашение →
+      </a>
+    </div>
+
+    <p style="color: #71717a; font-size: 12px; text-align: center; margin: 20px 0 0;">
+      Все решения работодателей: <a href="${invitationsUrl}" style="color: #a1a1aa;">${invitationsUrl}</a><br>
+      Квест: <a href="${questUrl}" style="color: #a1a1aa;">${questUrl}</a>
+    </p>
+
+    <div style="text-align: center; margin-top: 24px; padding-top: 20px; border-top: 1px solid #27272a;">
+      <a href="${baseUrl}/hero/settings" style="color: #71717a; font-size: 11px; text-decoration: underline;">
+        Отключить уведомления
+      </a>
+    </div>
+  </div>
+</body>
+</html>
+  `.trim();
+}

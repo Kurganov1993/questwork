@@ -37,9 +37,9 @@ type Row = {
 export default async function LeaderboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sort?: string }>;
+  searchParams: Promise<{ sort?: string; page?: string }>;
 }) {
-  const { sort: sortRaw } = await searchParams;
+  const { sort: sortRaw, page: pageRaw } = await searchParams;
   const sort = parseSort(sortRaw);
   const me = await getCurrentHero();
 
@@ -108,13 +108,22 @@ export default async function LeaderboardPage({
     }
   });
 
-  const top3 = enriched.slice(0, 3);
-  const rest = enriched.slice(3, 50);
+  const PAGE_SIZE = 20;
+  const totalHeroes = enriched.length;
+  const totalPages = Math.max(1, Math.ceil(totalHeroes / PAGE_SIZE));
+  const currentPage = Math.min(
+    totalPages,
+    Math.max(1, Number(pageRaw ?? 1) || 1),
+  );
+  const offset = (currentPage - 1) * PAGE_SIZE;
+  const rows = enriched.slice(offset, offset + PAGE_SIZE);
+
   const myRank = me ? enriched.findIndex((r) => r.id === me.id) + 1 : 0;
   const myRow = myRank > 0 ? enriched[myRank - 1] : null;
 
-  // Общая статистика платформы
-  const totalHeroes = enriched.length;
+  // Подиум только на первой странице
+  const top3 = currentPage === 1 ? enriched.slice(0, 3) : [];
+
   const totalXp = enriched.reduce((s, h) => s + h.xp, 0);
   const totalVictories = enriched.reduce((s, h) => s + h.victories, 0);
   const avgLevel =
@@ -124,7 +133,6 @@ export default async function LeaderboardPage({
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      {/* ==================== HERO ==================== */}
       <section className="relative overflow-hidden">
         <HeroBackground />
 
@@ -154,7 +162,6 @@ export default async function LeaderboardPage({
             </div>
           </div>
 
-          {/* Статистика платформы */}
           {totalHeroes > 0 && (
             <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-3">
               <StatCard
@@ -183,7 +190,6 @@ export default async function LeaderboardPage({
         </div>
       </section>
 
-      {/* ==================== МОЯ ПОЗИЦИЯ ==================== */}
       {me && myRow && (
         <section className="relative max-w-5xl mx-auto px-6 pb-8">
           <div className="glass-strong rounded-2xl p-5 relative overflow-hidden">
@@ -203,8 +209,8 @@ export default async function LeaderboardPage({
 
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 <div className="text-3xl shrink-0">
-                  {HERO_CLASSES.find((c) => c.value === myRow.heroClass)?.icon ??
-                    '🧙'}
+                  {HERO_CLASSES.find((c) => c.value === myRow.heroClass)
+                    ?.icon ?? '🧙'}
                 </div>
                 <div className="min-w-0">
                   <div className="font-semibold truncate">
@@ -235,7 +241,6 @@ export default async function LeaderboardPage({
         </section>
       )}
 
-      {/* ==================== ФИЛЬТРЫ ==================== */}
       <section className="relative max-w-5xl mx-auto px-6 pb-8">
         <div className="flex flex-wrap gap-2">
           {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => {
@@ -259,7 +264,6 @@ export default async function LeaderboardPage({
         </div>
       </section>
 
-      {/* ==================== ПОДИУМ ТОП-3 ==================== */}
       {top3.length > 0 && (
         <section className="relative max-w-5xl mx-auto px-6 pb-10">
           <HeroPodium
@@ -275,26 +279,24 @@ export default async function LeaderboardPage({
         </section>
       )}
 
-      {/* ==================== СПИСОК 4-50 ==================== */}
       <section className="relative max-w-5xl mx-auto px-6 pb-20">
         {enriched.length === 0 ? (
           <EmptyState />
-        ) : rest.length === 0 ? (
-          <div className="glass rounded-2xl p-8 text-center text-zinc-500 text-sm">
-            Пока только {top3.length}{' '}
-            {top3.length === 1 ? 'герой' : 'героя'} на платформе. Пригласи
-            друзей!
-          </div>
         ) : (
           <>
             <h2 className="text-sm font-mono tracking-[0.2em] text-zinc-500 flex items-center gap-3 mb-4">
               <span className="h-px w-6 bg-gradient-to-r from-transparent to-amber-500/60" />
-              МЕСТА 4 — {Math.min(50, enriched.length)}
+              {currentPage === 1 && top3.length > 0
+                ? `МЕСТА 4 — ${Math.min(offset + rows.length, totalHeroes)}`
+                : `МЕСТА ${offset + 1} — ${Math.min(
+                    offset + rows.length,
+                    totalHeroes,
+                  )}`}
             </h2>
 
             <div className="glass rounded-2xl overflow-hidden">
-              {rest.map((r, idx) => {
-                const place = idx + 4;
+              {rows.map((r, idx) => {
+                const place = offset + idx + 1;
                 const cls = HERO_CLASSES.find((c) => c.value === r.heroClass);
                 const isMe = me?.id === r.id;
 
@@ -311,14 +313,38 @@ export default async function LeaderboardPage({
                 );
               })}
             </div>
+
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center gap-2 mt-6">
+                {currentPage > 1 && (
+                  <Link
+                    href={`/leaderboard?sort=${sort}&page=${currentPage - 1}`}
+                    className="px-4 py-2 rounded-lg border border-white/10 text-sm text-zinc-300 hover:border-amber-500/60 transition"
+                  >
+                    ← Назад
+                  </Link>
+                )}
+
+                <span className="text-xs text-zinc-500 px-3">
+                  Страница {currentPage} из {totalPages}
+                </span>
+
+                {currentPage < totalPages && (
+                  <Link
+                    href={`/leaderboard?sort=${sort}&page=${currentPage + 1}`}
+                    className="px-4 py-2 rounded-lg border border-white/10 text-sm text-zinc-300 hover:border-amber-500/60 transition"
+                  >
+                    Вперёд →
+                  </Link>
+                )}
+              </div>
+            )}
           </>
         )}
       </section>
     </main>
   );
 }
-
-// ==================== ХЕЛПЕРЫ ====================
 
 function StatCard({
   label,
@@ -459,7 +485,9 @@ function EmptyState() {
   return (
     <div className="glass rounded-2xl p-12 text-center">
       <div className="text-5xl mb-4">🏆</div>
-      <h2 className="text-xl font-semibold mb-2">Пока никто не зарегистрирован</h2>
+      <h2 className="text-xl font-semibold mb-2">
+        Пока никто не зарегистрирован
+      </h2>
       <p className="text-zinc-400 mb-6 max-w-md mx-auto">
         Стань первым героем платформы. Создай персонажа, пройди квест — и
         займи первое место в зале славы.

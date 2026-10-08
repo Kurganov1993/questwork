@@ -15,34 +15,6 @@ export type AiUsageInput = {
   errorMessage?: string;
 };
 
-/**
- * Записывает факт использования AI. Никогда не бросает — падение
- * телеметрии не должно ломать основной процесс.
- */
-export async function recordAiUsage(input: AiUsageInput): Promise<void> {
-  try {
-    await db.insert(aiUsage).values({
-      heroId: input.heroId ?? null,
-      questId: input.questId ?? null,
-      provider: input.provider,
-      model: input.model,
-      tokensIn: input.tokensIn ?? 0,
-      tokensOut: input.tokensOut ?? 0,
-      durationMs: input.durationMs,
-      status: input.status,
-      errorMessage: input.errorMessage?.slice(0, 500) ?? null,
-    });
-  } catch (e) {
-    logger.warn('ai-usage.record.failed', {
-      message: (e as Error).message,
-    });
-  }
-}
-
-/**
- * Оценка стоимости в долларах. Только для самых популярных моделей.
- * Для остальных — 0, считаем только токены.
- */
 const PRICING: Record<string, { in: number; out: number }> = {
   'openai/gpt-4o-mini-2024-07-18': { in: 0.15, out: 0.6 },
   'openai/gpt-4o-2024-08-06': { in: 2.5, out: 10 },
@@ -60,28 +32,50 @@ export function estimateCostUsd(
   return (tokensIn / 1_000_000) * p.in + (tokensOut / 1_000_000) * p.out;
 }
 
+export async function recordAiUsage(input: AiUsageInput): Promise<void> {
+  const tokensIn = input.tokensIn ?? 0;
+  const tokensOut = input.tokensOut ?? 0;
+  const costUsd = estimateCostUsd(input.model, tokensIn, tokensOut);
+
+  try {
+    await db.insert(aiUsage).values({
+      heroId: input.heroId ?? null,
+      questId: input.questId ?? null,
+      provider: input.provider,
+      model: input.model,
+      tokensIn,
+      tokensOut,
+      costUsd: costUsd.toFixed(6),
+      durationMs: input.durationMs,
+      status: input.status,
+      errorMessage: input.errorMessage?.slice(0, 500) ?? null,
+    });
+  } catch (e) {
+    logger.warn('ai-usage.record.failed', {
+      message: (e as Error).message,
+    });
+  }
+}
+
 export type AiUsageStats = {
   today: {
     calls: number;
     tokensIn: number;
     tokensOut: number;
-    estimatedCostUsd: number;
+    costUsd: number;
   };
   last30Days: {
     calls: number;
     tokensIn: number;
     tokensOut: number;
-    estimatedCostUsd: number;
+    costUsd: number;
   };
 };
 
-/**
- * Статистика использования AI. Для админ-панели или health-check.
- */
 export async function getAiUsageStats(): Promise<AiUsageStats> {
   const empty = {
-    today: { calls: 0, tokensIn: 0, tokensOut: 0, estimatedCostUsd: 0 },
-    last30Days: { calls: 0, tokensIn: 0, tokensOut: 0, estimatedCostUsd: 0 },
+    today: { calls: 0, tokensIn: 0, tokensOut: 0, costUsd: 0 },
+    last30Days: { calls: 0, tokensIn: 0, tokensOut: 0, costUsd: 0 },
   };
 
   try {
@@ -99,6 +93,7 @@ export async function getAiUsageStats(): Promise<AiUsageStats> {
           calls: sql<number>`count(*)::int`,
           tokensIn: sql<number>`coalesce(sum(${aiUsage.tokensIn}), 0)::int`,
           tokensOut: sql<number>`coalesce(sum(${aiUsage.tokensOut}), 0)::int`,
+          costUsd: sql<number>`coalesce(sum(${aiUsage.costUsd}), 0)::float`,
         })
         .from(aiUsage)
         .where(gte(aiUsage.createdAt, todayStart)),
@@ -107,6 +102,7 @@ export async function getAiUsageStats(): Promise<AiUsageStats> {
           calls: sql<number>`count(*)::int`,
           tokensIn: sql<number>`coalesce(sum(${aiUsage.tokensIn}), 0)::int`,
           tokensOut: sql<number>`coalesce(sum(${aiUsage.tokensOut}), 0)::int`,
+          costUsd: sql<number>`coalesce(sum(${aiUsage.costUsd}), 0)::float`,
         })
         .from(aiUsage)
         .where(gte(aiUsage.createdAt, thirtyDaysAgo)),
@@ -120,13 +116,13 @@ export async function getAiUsageStats(): Promise<AiUsageStats> {
         calls: Number(t?.calls ?? 0),
         tokensIn: Number(t?.tokensIn ?? 0),
         tokensOut: Number(t?.tokensOut ?? 0),
-        estimatedCostUsd: 0, // приблизительно, без разбивки по моделям
+        costUsd: Number(t?.costUsd ?? 0),
       },
       last30Days: {
         calls: Number(m?.calls ?? 0),
         tokensIn: Number(m?.tokensIn ?? 0),
         tokensOut: Number(m?.tokensOut ?? 0),
-        estimatedCostUsd: 0,
+        costUsd: Number(m?.costUsd ?? 0),
       },
     };
   } catch (e) {

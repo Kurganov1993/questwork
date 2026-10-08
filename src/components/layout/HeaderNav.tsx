@@ -66,10 +66,16 @@ export function HeaderNav({
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
+  // Админ определяется через публичную env-переменную
+  const isAdmin =
+    hero !== null &&
+    Number(process.env.NEXT_PUBLIC_ADMIN_HERO_ID ?? 0) === hero.id;
+
   const NAV = [
     { href: '/quests', label: 'Квесты' },
     { href: '/leaderboard', label: 'Лидерборд' },
     { href: '/employer', label: 'Работодателям' },
+    ...(isAdmin ? [{ href: '/admin', label: 'Админ' }] : []),
   ];
 
   return (
@@ -107,6 +113,8 @@ export function HeaderNav({
                   className={`relative py-1 transition ${
                     active
                       ? 'text-amber-400'
+                      : link.href === '/admin'
+                      ? 'text-red-400/80 hover:text-red-300'
                       : 'text-zinc-400 hover:text-amber-400'
                   }`}
                 >
@@ -218,13 +226,11 @@ export function HeaderNav({
       {/* Мобильное меню */}
       {mobileOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
-          {/* Затемнение */}
           <div
             className="absolute inset-0 bg-zinc-950/95 backdrop-blur-xl"
             onClick={() => setMobileOpen(false)}
           />
 
-          {/* Содержимое */}
           <div
             className="relative h-full flex flex-col p-6 overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
@@ -259,6 +265,7 @@ export function HeaderNav({
             <nav className="space-y-2">
               {NAV.map((link) => {
                 const active = isActive(link.href);
+                const isAdminLink = link.href === '/admin';
                 return (
                   <Link
                     key={link.href}
@@ -266,6 +273,8 @@ export function HeaderNav({
                     className={`flex items-center justify-between px-4 py-3.5 rounded-xl text-base transition ${
                       active
                         ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                        : isAdminLink
+                        ? 'text-red-400/80 hover:bg-red-500/5 border border-transparent'
                         : 'text-zinc-300 hover:bg-white/5 border border-transparent'
                     }`}
                   >

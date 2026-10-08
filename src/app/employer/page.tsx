@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { eq, desc, sql, and } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { quests, submissions, customers } from '@/db/schema';
 import { getCurrentCustomer } from '@/lib/customer-auth';
@@ -23,12 +23,12 @@ function parseStatus(value: string | undefined): StatusFilter {
 export default async function EmployerDashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<{ status?: string; page?: string }>;
 }) {
   const customer = await getCurrentCustomer();
   if (!customer) redirect('/employer/login');
 
-  const { status: statusRaw } = await searchParams;
+  const { status: statusRaw, page: pageRaw } = await searchParams;
   const filter = parseStatus(statusRaw);
 
   const [customerRow] = await withRetry(
@@ -129,6 +129,15 @@ export default async function EmployerDashboard({
     return q.status === filter;
   });
 
+  const PAGE_SIZE = 12;
+  const totalPages = Math.max(1, Math.ceil(visibleQuests.length / PAGE_SIZE));
+  const currentPage = Math.min(
+    totalPages,
+    Math.max(1, Number(pageRaw ?? 1) || 1),
+  );
+  const offset = (currentPage - 1) * PAGE_SIZE;
+  const paginatedQuests = visibleQuests.slice(offset, offset + PAGE_SIZE);
+
   const FILTERS: {
     value: StatusFilter;
     label: string;
@@ -141,6 +150,14 @@ export default async function EmployerDashboard({
   ];
 
   const isNewCompany = myQuests.length === 0 && totalSubmissions === 0;
+
+  function buildPageUrl(page: number) {
+    const params = new URLSearchParams();
+    if (filter !== 'all') params.set('status', filter);
+    if (page > 1) params.set('page', String(page));
+    const s = params.toString();
+    return s ? `/employer?${s}` : '/employer';
+  }
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -279,103 +296,131 @@ export default async function EmployerDashboard({
             </Link>
           </div>
         ) : (
-          <div className="space-y-4" data-cascade>
-            {visibleQuests.map((q) => {
-              const st = statsMap.get(q.id);
-              const total = st?.total ?? 0;
-              const victories = st?.victories ?? 0;
-              const uniqueHeroes = st?.uniqueHeroes ?? 0;
-              const winPct =
-                total > 0 ? Math.round((victories / total) * 100) : 0;
+          <>
+            <div className="space-y-4" data-cascade>
+              {paginatedQuests.map((q) => {
+                const st = statsMap.get(q.id);
+                const total = st?.total ?? 0;
+                const victories = st?.victories ?? 0;
+                const uniqueHeroes = st?.uniqueHeroes ?? 0;
+                const winPct =
+                  total > 0 ? Math.round((victories / total) * 100) : 0;
 
-              const statusMeta = {
-                active: {
-                  label: 'активен',
-                  color:
-                    'bg-emerald-500/15 text-emerald-300 border-emerald-700/40',
-                },
-                draft: {
-                  label: 'черновик',
-                  color: 'bg-zinc-500/15 text-zinc-300 border-zinc-700/40',
-                },
-                archived: {
-                  label: 'архив',
-                  color:
-                    'bg-amber-500/15 text-amber-300 border-amber-700/40',
-                },
-              }[q.status];
+                const statusMeta = {
+                  active: {
+                    label: 'активен',
+                    color:
+                      'bg-emerald-500/15 text-emerald-300 border-emerald-700/40',
+                  },
+                  draft: {
+                    label: 'черновик',
+                    color: 'bg-zinc-500/15 text-zinc-300 border-zinc-700/40',
+                  },
+                  archived: {
+                    label: 'архив',
+                    color:
+                      'bg-amber-500/15 text-amber-300 border-amber-700/40',
+                  },
+                }[q.status];
 
-              return (
-                <div key={q.id} data-cascade-item>
-                  <TiltCard max={2}>
-                    <Link
-                      href={`/employer/quests/${q.id}`}
-                      className="block glass card-glow rounded-2xl p-6 relative overflow-hidden group"
-                    >
-                      <div className="absolute -top-24 -right-24 w-56 h-56 rounded-full bg-amber-500/10 blur-3xl group-hover:bg-amber-500/20 transition-all duration-500" />
+                return (
+                  <div key={q.id} data-cascade-item>
+                    <TiltCard max={2}>
+                      <Link
+                        href={`/employer/quests/${q.id}`}
+                        className="block glass card-glow rounded-2xl p-6 relative overflow-hidden group"
+                      >
+                        <div className="absolute -top-24 -right-24 w-56 h-56 rounded-full bg-amber-500/10 blur-3xl group-hover:bg-amber-500/20 transition-all duration-500" />
 
-                      <div className="relative flex items-start justify-between gap-6 flex-wrap">
-                        <div className="flex items-start gap-5 flex-1 min-w-0">
-                          <div className="text-4xl shrink-0 drop-shadow-[0_0_20px_rgba(251,191,36,0.3)]">
-                            {q.icon}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 mb-2 flex-wrap">
-                              <h3 className="font-semibold text-lg group-hover:text-amber-400 transition">
-                                {q.title}
-                              </h3>
-                              <span
-                                className={`text-xs px-2 py-0.5 rounded-full border ${statusMeta.color}`}
-                              >
-                                {statusMeta.label}
-                              </span>
+                        <div className="relative flex items-start justify-between gap-6 flex-wrap">
+                          <div className="flex items-start gap-5 flex-1 min-w-0">
+                            <div className="text-4xl shrink-0 drop-shadow-[0_0_20px_rgba(251,191,36,0.3)]">
+                              {q.icon}
                             </div>
-                            <p className="text-sm text-zinc-400 mb-3 line-clamp-2 max-w-2xl">
-                              {q.description}
-                            </p>
-                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500">
-                              <span>👑 {q.bossName}</span>
-                              <span>❤️ {q.bossMaxHp} HP</span>
-                              <span>✨ {q.rewardXp} XP</span>
-                              <span>🪙 {q.rewardGold}</span>
-                              <span>порог {q.victoryThreshold}%</span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                <h3 className="font-semibold text-lg group-hover:text-amber-400 transition">
+                                  {q.title}
+                                </h3>
+                                <span
+                                  className={`text-xs px-2 py-0.5 rounded-full border ${statusMeta.color}`}
+                                >
+                                  {statusMeta.label}
+                                </span>
+                              </div>
+                              <p className="text-sm text-zinc-400 mb-3 line-clamp-2 max-w-2xl">
+                                {q.description}
+                              </p>
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500">
+                                <span>👑 {q.bossName}</span>
+                                <span>❤️ {q.bossMaxHp} HP</span>
+                                <span>✨ {q.rewardXp} XP</span>
+                                <span>🪙 {q.rewardGold}</span>
+                                <span>порог {q.victoryThreshold}%</span>
+                              </div>
                             </div>
+                          </div>
+
+                          <div className="shrink-0 flex gap-4">
+                            <QuestStat
+                              label="сдач"
+                              value={total}
+                              sub={
+                                uniqueHeroes > 0
+                                  ? `${uniqueHeroes} героев`
+                                  : undefined
+                              }
+                            />
+                            <QuestStat
+                              label="побед"
+                              value={victories}
+                              sub={`${winPct}% winrate`}
+                              accent={victories > 0}
+                            />
                           </div>
                         </div>
 
-                        <div className="shrink-0 flex gap-4">
-                          <QuestStat
-                            label="сдач"
-                            value={total}
-                            sub={
-                              uniqueHeroes > 0
-                                ? `${uniqueHeroes} героев`
-                                : undefined
-                            }
-                          />
-                          <QuestStat
-                            label="побед"
-                            value={victories}
-                            sub={`${winPct}% winrate`}
-                            accent={victories > 0}
-                          />
-                        </div>
-                      </div>
+                        {total > 0 && (
+                          <div className="relative mt-4 h-1 rounded-full bg-white/5 overflow-hidden">
+                            <div
+                              className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-emerald-500/60 to-emerald-400 rounded-full transition-all"
+                              style={{ width: `${winPct}%` }}
+                            />
+                          </div>
+                        )}
+                      </Link>
+                    </TiltCard>
+                  </div>
+                );
+              })}
+            </div>
 
-                      {total > 0 && (
-                        <div className="relative mt-4 h-1 rounded-full bg-white/5 overflow-hidden">
-                          <div
-                            className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-emerald-500/60 to-emerald-400 rounded-full transition-all"
-                            style={{ width: `${winPct}%` }}
-                          />
-                        </div>
-                      )}
-                    </Link>
-                  </TiltCard>
-                </div>
-              );
-            })}
-          </div>
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center gap-2 mt-6">
+                {currentPage > 1 && (
+                  <Link
+                    href={buildPageUrl(currentPage - 1)}
+                    className="px-4 py-2 rounded-lg border border-white/10 text-sm text-zinc-300 hover:border-amber-500/60 transition"
+                  >
+                    ← Назад
+                  </Link>
+                )}
+
+                <span className="text-xs text-zinc-500 px-3">
+                  Страница {currentPage} из {totalPages}
+                </span>
+
+                {currentPage < totalPages && (
+                  <Link
+                    href={buildPageUrl(currentPage + 1)}
+                    className="px-4 py-2 rounded-lg border border-white/10 text-sm text-zinc-300 hover:border-amber-500/60 transition"
+                  >
+                    Вперёд →
+                  </Link>
+                )}
+              </div>
+            )}
+          </>
         )}
       </section>
 

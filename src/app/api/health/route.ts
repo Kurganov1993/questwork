@@ -10,8 +10,6 @@ export const dynamic = 'force-dynamic';
 
 const startTime = Date.now();
 
-// Простой in-memory rate limit: максимум 60 запросов в минуту с одного IP.
-// Для health-check этого хватит, ставить в БД — избыточно.
 const healthRateLimit = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 60;
@@ -30,7 +28,6 @@ function checkHealthRateLimit(ip: string): boolean {
   return true;
 }
 
-// Периодическая очистка памяти — раз в 5 минут
 let lastCleanup = 0;
 function maybeCleanup() {
   const now = Date.now();
@@ -60,6 +57,8 @@ async function withTimeout<T>(
   ]);
 }
 
+
+
 export async function GET(req: Request) {
   maybeCleanup();
 
@@ -77,7 +76,7 @@ export async function GET(req: Request) {
 
   const checks: Record<string, Check> = {};
 
-  // --- Database ---
+  // Database
   {
     const t = Date.now();
     try {
@@ -92,7 +91,7 @@ export async function GET(req: Request) {
     }
   }
 
-  // --- Docker ---
+  // Docker
   {
     const t = Date.now();
     try {
@@ -111,7 +110,7 @@ export async function GET(req: Request) {
     }
   }
 
-  // --- AI ---
+  // AI
   {
     const info = getProviderInfo();
     checks.ai = {
@@ -123,7 +122,7 @@ export async function GET(req: Request) {
     };
   }
 
-  // --- AI usage (не критично, но полезно) ---
+  // AI usage
   let aiStats: Awaited<ReturnType<typeof getAiUsageStats>> | null = null;
   try {
     aiStats = await withTimeout(getAiUsageStats(), 2000, 'ai-stats');
@@ -149,7 +148,18 @@ export async function GET(req: Request) {
       timestamp: new Date().toISOString(),
       version: process.env.NEXT_PUBLIC_APP_VERSION ?? 'dev',
       checks,
-      ai: aiStats,
+      ai: aiStats
+        ? {
+            today: {
+              ...aiStats.today,
+              costUsd: Number(aiStats.today.costUsd.toFixed(4)),
+            },
+            last30Days: {
+              ...aiStats.last30Days,
+              costUsd: Number(aiStats.last30Days.costUsd.toFixed(4)),
+            },
+          }
+        : null,
     },
     {
       status: httpStatus,

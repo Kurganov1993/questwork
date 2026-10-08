@@ -29,6 +29,7 @@ export function VerifyClient({
   bossMaxHp,
   phaseNames,
   initialRepo,
+  dockerAvailable = true,
 }: {
   questSlug: string;
   questTitle: string;
@@ -36,6 +37,7 @@ export function VerifyClient({
   bossMaxHp: number;
   phaseNames: string[];
   initialRepo?: string;
+  dockerAvailable?: boolean;
 }) {
   const [repoUrl, setRepoUrl] = useState(initialRepo ?? '');
   const [loading, setLoading] = useState(false);
@@ -49,7 +51,6 @@ export function VerifyClient({
   const [queueWaitMs, setQueueWaitMs] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Таймер во время проверки
   useEffect(() => {
     if (!loading) {
       setElapsed(0);
@@ -62,7 +63,6 @@ export function VerifyClient({
     return () => clearInterval(id);
   }, [loading]);
 
-  // Прерывание запроса при размонтировании
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
@@ -198,6 +198,14 @@ export function VerifyClient({
               className="w-full px-4 py-3 rounded-xl bg-white/[0.02] border border-white/10 focus:border-amber-500/60 outline-none font-mono text-sm transition"
               disabled={loading}
             />
+
+            {!dockerAvailable && (
+              <div className="text-xs text-amber-400/80 bg-amber-950/20 border border-amber-800/40 rounded-xl p-3">
+                ⚠️ Docker выключен. Фазы «Сборка» и «Тесты» будут проверены
+                эвристикой. Результат может быть неточным.
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={loading}
@@ -401,7 +409,6 @@ export function VerifyClient({
             </div>
           </div>
 
-          {/* Лут */}
           {report.victory && report.loot && report.loot.length > 0 && (
             <div>
               <SectionLabel>ЛУТ</SectionLabel>
@@ -415,7 +422,6 @@ export function VerifyClient({
             </div>
           )}
 
-          {/* Достижения */}
           {report.achievementsGained &&
             report.achievementsGained.length > 0 && (
               <div>
@@ -432,7 +438,6 @@ export function VerifyClient({
               </div>
             )}
 
-          {/* Лог боя */}
           <div>
             <SectionLabel>ЛОГ БОЯ</SectionLabel>
             <div className="space-y-3">
@@ -446,8 +451,6 @@ export function VerifyClient({
     </>
   );
 }
-
-// ==================== ХЕЛПЕРЫ ====================
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (

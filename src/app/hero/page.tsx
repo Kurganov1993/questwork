@@ -250,6 +250,12 @@ export default async function HeroPage() {
 
               <div className="flex flex-col items-start sm:items-end gap-2 shrink-0">
                 <Link
+                  href="/hero/settings"
+                  className="text-xs text-zinc-500 hover:text-amber-400 transition"
+                >
+                  Настройки →
+                </Link>
+                <Link
                   href="/hero/invitations"
                   className="text-xs text-zinc-500 hover:text-amber-400 transition"
                 >

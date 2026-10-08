@@ -1,7 +1,9 @@
 import { db } from '@/db';
-import { submissions, quests } from '@/db/schema';
+import { submissions, quests, heroes } from '@/db/schema';
 import { and, eq, isNull, isNotNull, desc } from 'drizzle-orm';
 import { withRetry } from './db-retry';
+import { sendEmail, invitationEmailHtml } from './email';
+import { logger } from './logger';
 
 export type EmployerNotification = {
   submissionId: number;
@@ -57,7 +59,9 @@ export async function getHeroNotifications(
   }
 }
 
-export async function countUnseenNotifications(heroId: number): Promise<number> {
+export async function countUnseenNotifications(
+  heroId: number,
+): Promise<number> {
   try {
     const rows = await withRetry(
       () =>
@@ -121,6 +125,103 @@ export async function markAllSeen(heroId: number): Promise<boolean> {
     );
     return true;
   } catch {
+    return false;
+  }
+}
+
+// ============================================================
+// Email-уведомления
+// ============================================================
+
+type NotifyInput = {
+  heroId: number;
+  companyName: string;
+  questTitle: string;
+  questSlug: string;
+  status: 'shortlisted' | 'interview' | 'hired' | 'rejected';
+  note: string | null;
+};
+
+/**
+ * Отправляет email-уведомление герою о решении работодателя.
+ * Пропускает, если email не задан, не подтверждён, или уведомления отключены.
+ * Никогда не бросает — вызывается фоновым вызовом через void.
+ */
+export async function notifyHeroByEmail(
+  input: NotifyInput,
+): Promise<boolean> {
+  try {
+    const [hero] = await db
+      .select({
+        nickname: heroes.nickname,
+        email: heroes.email,
+        emailVerifiedAt: heroes.emailVerifiedAt,
+        notifyByEmail: heroes.notifyByEmail,
+      })
+      .from(heroes)
+      .where(eq(heroes.id, input.heroId));
+
+    if (!hero || !hero.email) {
+      logger.info('notify.skipped', {
+        heroId: input.heroId,
+        reason: 'no_email',
+      });
+      return false;
+    }
+
+    if (!hero.emailVerifiedAt) {
+      logger.info('notify.skipped', {
+        heroId: input.heroId,
+        reason: 'email_not_verified',
+      });
+      return false;
+    }
+
+    if (!hero.notifyByEmail) {
+      logger.info('notify.skipped', {
+        heroId: input.heroId,
+        reason: 'user_disabled',
+      });
+      return false;
+    }
+
+    const baseUrl =
+      process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+
+    const subjects: Record<NotifyInput['status'], string> = {
+      shortlisted: `${input.companyName} добавила тебя в шортлист`,
+      interview: `${input.companyName} приглашает на интервью`,
+      hired: `🎉 ${input.companyName} хочет нанять тебя`,
+      rejected: `${input.companyName} — решение по твоей сдаче`,
+    };
+
+    const sent = await sendEmail({
+      to: hero.email,
+      subject: subjects[input.status],
+      html: invitationEmailHtml({
+        heroNickname: hero.nickname,
+        companyName: input.companyName,
+        questTitle: input.questTitle,
+        questSlug: input.questSlug,
+        status: input.status,
+        note: input.note,
+        baseUrl,
+      }),
+      text: `${input.companyName}: ${subjects[input.status]}. Открыть: ${baseUrl}/hero/invitations`,
+    });
+
+    logger.info('notify.sent', {
+      heroId: input.heroId,
+      status: input.status,
+      sent,
+    });
+
+    return sent;
+  } catch (e) {
+    logger.error('notify.failed', {
+      heroId: input.heroId,
+      message: (e as Error).message,
+    });
     return false;
   }
 }

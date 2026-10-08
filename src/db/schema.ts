@@ -9,6 +9,8 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  numeric,
+  boolean,
 } from 'drizzle-orm/pg-core';
 
 // ============================================================
@@ -63,6 +65,9 @@ export const heroes = pgTable('heroes', {
   level: integer('level').notNull().default(1),
   xp: integer('xp').notNull().default(0),
   gold: integer('gold').notNull().default(0),
+  email: varchar('email', { length: 255 }),
+  emailVerifiedAt: timestamp('email_verified_at'),
+  notifyByEmail: boolean('notify_by_email').notNull().default(true),
   termsAcceptedAt: timestamp('terms_accepted_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
@@ -316,6 +321,9 @@ export const aiUsage = pgTable(
     model: varchar('model', { length: 128 }).notNull(),
     tokensIn: integer('tokens_in').notNull().default(0),
     tokensOut: integer('tokens_out').notNull().default(0),
+    costUsd: numeric('cost_usd', { precision: 10, scale: 6 })
+      .notNull()
+      .default('0'),
     durationMs: integer('duration_ms').notNull().default(0),
     status: varchar('status', { length: 32 }).notNull().default('ok'),
     errorMessage: text('error_message'),

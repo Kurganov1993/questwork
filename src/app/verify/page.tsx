@@ -5,6 +5,7 @@ import { db } from '@/db';
 import { quests, bossPhases, submissions } from '@/db/schema';
 import { getCurrentHero } from '@/lib/auth';
 import { withRetry } from '@/lib/db-retry';
+import { isDockerAvailable } from '@/lib/docker/client';
 import { HeroBackground } from '@/components/home/HeroBackground';
 import { VerifyClient } from './VerifyClient';
 
@@ -46,13 +47,7 @@ export default async function VerifyPage({
     .sort((a, b) => a.phaseOrder - b.phaseOrder)
     .map((p) => p.name);
 
-  // История попыток героя на этот квест
-  let heroAttempts = {
-    total: 0,
-    victories: 0,
-    best: 0,
-  };
-
+  let heroAttempts = { total: 0, victories: 0, best: 0 };
   try {
     const [agg] = await withRetry(
       () =>
@@ -81,6 +76,13 @@ export default async function VerifyPage({
     console.error('[verify] attempts failed:', (e as Error).message);
   }
 
+  let dockerAvailable = true;
+  try {
+    dockerAvailable = await isDockerAvailable();
+  } catch {
+    dockerAvailable = false;
+  }
+
   const stars =
     '★'.repeat(quest.difficulty) +
     '☆'.repeat(Math.max(0, 5 - quest.difficulty));
@@ -90,7 +92,6 @@ export default async function VerifyPage({
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      {/* ==================== HERO ==================== */}
       <section className="relative overflow-hidden">
         <HeroBackground />
 
@@ -124,8 +125,28 @@ export default async function VerifyPage({
             </div>
           </div>
 
+          {/* Docker warning */}
+          {!dockerAvailable && (
+            <div className="mt-8 glass rounded-2xl p-5 border-l-2 border-l-amber-500/60">
+              <div className="flex items-start gap-3">
+                <span className="text-2xl shrink-0">🐳</span>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold mb-1 text-amber-200">
+                    Docker недоступен
+                  </div>
+                  <div className="text-xs text-zinc-400">
+                    Фазы «Сборка» и «Тесты» будут проверены эвристикой — по
+                    файлам, а не реальным запуском. Результат может быть
+                    неточным. Если запускаешь проект локально — включи Docker
+                    Desktop и обнови страницу.
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Инфо-карточка про квест и босса */}
-          <div className="mt-8 glass rounded-2xl p-5 relative overflow-hidden">
+          <div className="mt-6 glass rounded-2xl p-5 relative overflow-hidden">
             <div className="absolute -top-24 -right-24 w-64 h-64 rounded-full bg-amber-500/10 blur-[80px]" />
 
             <div className="relative flex items-center justify-between gap-5 flex-wrap">
@@ -168,7 +189,6 @@ export default async function VerifyPage({
             )}
           </div>
 
-          {/* Ссылка на GitHub-репозитории */}
           <div className="mt-5 flex items-center justify-between gap-3 flex-wrap text-xs">
             <Link
               href="/hero/github"
@@ -185,7 +205,6 @@ export default async function VerifyPage({
         </div>
       </section>
 
-      {/* ==================== ФОРМА ПРОВЕРКИ ==================== */}
       <section className="relative max-w-3xl mx-auto px-6 pb-10">
         <VerifyClient
           questSlug={quest.slug}
@@ -194,12 +213,15 @@ export default async function VerifyPage({
           bossMaxHp={quest.bossMaxHp}
           phaseNames={phaseNames}
           initialRepo={initialRepo}
+          dockerAvailable={dockerAvailable}
         />
       </section>
 
-      {/* ==================== ПОДСКАЗКИ ==================== */}
       <section className="relative max-w-3xl mx-auto px-6 pb-20">
-        <SectionLabel>ЧТО ПРОВЕРЯЕТСЯ</SectionLabel>
+        <h2 className="text-sm font-mono tracking-[0.2em] text-zinc-500 flex items-center gap-3 mb-4">
+          <span className="h-px w-6 bg-gradient-to-r from-transparent to-amber-500/60" />
+          ЧТО ПРОВЕРЯЕТСЯ
+        </h2>
 
         <div className="glass rounded-2xl p-6">
           <div className="grid sm:grid-cols-2 gap-4 mb-5">
@@ -238,17 +260,6 @@ export default async function VerifyPage({
         </div>
       </section>
     </main>
-  );
-}
-
-// ==================== ХЕЛПЕРЫ ====================
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 className="text-sm font-mono tracking-[0.2em] text-zinc-500 flex items-center gap-3 mb-4">
-      <span className="h-px w-6 bg-gradient-to-r from-transparent to-amber-500/60" />
-      {children}
-    </h2>
   );
 }
 
